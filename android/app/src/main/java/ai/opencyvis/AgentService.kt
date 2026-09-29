@@ -430,6 +430,7 @@ class AgentService : Service() {
                 },
                 shouldForwardScreenshot = { config.imSendStepScreenshots },
                 blacklistedPackages = config.blacklistedPackages,
+                isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive },
                 onSaveRoutine = { name, icon, instr, schedType, schedTime, schedRepeat,
                                   schedInterval, schedLocation, schedOnEnter ->
                     scope.launch(Dispatchers.IO) {
@@ -552,7 +553,8 @@ class AgentService : Service() {
             viewTreeProvider = { displayId, w, h ->
                 VdAccessibilityService.captureViewTree(displayId, w, h)
             },
-            blacklistedPackages = config.blacklistedPackages
+            blacklistedPackages = config.blacklistedPackages,
+            isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive }
         )
         engine = newEngine
         currentInstruction = "debug takeover verification"
@@ -1015,6 +1017,7 @@ class AgentService : Service() {
 
     @Suppress("DEPRECATION")
     private fun acquireAgentWakeLock() {
+        backend?.setVirtualDisplayAwake(true)
         val current = agentWakeLock
         if (current?.isHeld == true) return
 
@@ -1035,6 +1038,7 @@ class AgentService : Service() {
     }
 
     private fun releaseAgentWakeLock() {
+        backend?.setVirtualDisplayAwake(false)
         val wakeLock = agentWakeLock ?: return
         try {
             if (wakeLock.isHeld) wakeLock.release()

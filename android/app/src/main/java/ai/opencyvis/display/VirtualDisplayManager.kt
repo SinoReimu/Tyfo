@@ -329,7 +329,13 @@ class VirtualDisplayManager(
                 // For RemoteBackend (shell uid), DO NOT use AUTO_MIRROR.
                 // Without TRUSTED permission, AUTO_MIRROR causes the VD to permanently
                 // mirror display 0 instead of showing independently launched activities.
+                // OWN_CONTENT_ONLY is required for OWN_DISPLAY_GROUP to stick: DMS turns a PUBLIC
+                // display into AUTO_MIRROR, and AUTO_MIRROR forces the default display group —
+                // where the VD powers off (renders black) whenever the phone screen turns off.
+                // DEVICE_DISPLAY_GROUP stays as a fallback: without some non-default group flag
+                // DMS drops ALWAYS_UNLOCKED.
                 flags = flags or
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
                     VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS or
                     VIRTUAL_DISPLAY_FLAG_TRUSTED or
                     VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP or

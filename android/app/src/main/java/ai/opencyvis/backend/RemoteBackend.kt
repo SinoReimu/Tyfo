@@ -100,6 +100,10 @@ class RemoteBackend(
 
     override fun releaseVirtualDisplay() { try { binder.releaseVirtualDisplay() } catch (_: Exception) {} }
 
+    override fun setVirtualDisplayAwake(awake: Boolean) {
+        try { binder.setVirtualDisplayAwake(awake) } catch (_: Exception) {}
+    }
+
     override fun setVirtualDisplaySurface(surface: Surface?) {
         try { binder.setVirtualDisplaySurface(surface) } catch (_: Exception) {}
     }

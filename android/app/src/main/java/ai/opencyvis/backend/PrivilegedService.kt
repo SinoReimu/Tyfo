@@ -107,7 +107,10 @@ class PrivilegedService : IPrivilegedService.Stub() {
         // Prefer mirror VD's cached frame — the listener continuously caches the latest
         // frame from the mirror ImageReader, so this works regardless of the main VD's
         // surface state (SurfaceView vs ImageReader).
-        val mirrorJpeg = cachedMirrorFrame
+        // The mirror sits in display group 0 and blanks while the phone screen is off;
+        // the main VD (own display group) keeps rendering, so read it directly then.
+        val mirrorOn = mirrorVd?.display?.state == android.view.Display.STATE_ON
+        val mirrorJpeg = if (mirrorOn) cachedMirrorFrame else null
         if (mirrorJpeg != null) {
             Log.d(TAG, "captureFromImageReader: using mirror frame (${mirrorJpeg.size} bytes)")
             if (maxWidth > 0) {
@@ -232,6 +235,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
             cachedVdFrame = null
             mirrorReady = false
             Log.i(TAG, "VD created: displayId=$displayId ${width}x${height}")
+            if (vdAwakeRequested) acquireVdWakeLock(displayId)
 
             // Create a mirror VD for always-on capture.
             // Uses DisplayManager.createVirtualDisplay(name, w, h, displayIdToMirror, surface)
@@ -559,6 +563,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
             mirrorHandlerThread = null
             cachedMirrorFrame = null
             mirrorReady = false
+            releaseVdWakeLock()
             virtualDisplay?.release()
             vdImageReader?.close()
             virtualDisplay = null
@@ -568,6 +573,86 @@ class PrivilegedService : IPrivilegedService.Stub() {
             Log.i(TAG, "VD released")
         } catch (e: Exception) {
             Log.e(TAG, "releaseVirtualDisplay failed", e)
+        }
+    }
+
+    // A VD in its own display group also gets its own power group, which dozes on its own
+    // user-activity timeout (~10s while the keyguard is up) and then renders black. A screen
+    // wake lock scoped to the VD's display keeps only that group awake, never the phone panel.
+    // Held only while the app says a task is running: any awake display group holds the
+    // display suspend blocker, so an idle VD holding it would stop the phone deep-sleeping.
+    private var vdWakeLockToken: android.os.IBinder? = null
+    @Volatile private var vdAwakeRequested = false
+
+    override fun setVirtualDisplayAwake(awake: Boolean) {
+        checkCaller()
+        vdAwakeRequested = awake
+        if (!awake) {
+            releaseVdWakeLock()
+        } else if (vdWakeLockToken == null && vdDisplayId > 0) {
+            acquireVdWakeLock(vdDisplayId)
+        }
+    }
+
+    private val powerManagerService: Any? by lazy {
+        try {
+            val binder = Class.forName("android.os.ServiceManager")
+                .getMethod("getService", String::class.java).invoke(null, "power") as android.os.IBinder
+            Class.forName("android.os.IPowerManager\$Stub")
+                .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
+        } catch (e: Exception) {
+            Log.w(TAG, "IPowerManager unavailable: ${e.message}")
+            null
+        }
+    }
+
+    @SuppressLint("PrivateApi")
+    private fun acquireVdWakeLock(displayId: Int) {
+        releaseVdWakeLock()
+        try {
+            val dmg = Class.forName("android.hardware.display.DisplayManagerGlobal")
+                .getMethod("getInstance").invoke(null)
+            val info = dmg.javaClass.getMethod("getDisplayInfo", Int::class.javaPrimitiveType)
+                .invoke(dmg, displayId) ?: return
+            val groupId = info.javaClass.getField("displayGroupId").getInt(info)
+            // In group 0 this lock would keep the physical screen on — never do that.
+            if (groupId == 0) {
+                Log.w(TAG, "VD $displayId is in the default display group; not holding a wake lock")
+                return
+            }
+            val pm = powerManagerService ?: return
+            val method = pm.javaClass.methods.firstOrNull {
+                it.name == "acquireWakeLock" && it.parameterCount >= 7
+            } ?: return
+            val token = Binder()
+            @Suppress("DEPRECATION")
+            val flags = android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP
+            // (lock, flags, tag, packageName, workSource, historyTag, displayId[, callback])
+            val args = arrayOfNulls<Any>(method.parameterCount)
+            args[0] = token
+            args[1] = flags
+            args[2] = "OpenCyvis:vd"
+            args[3] = "com.android.shell"
+            args[6] = displayId
+            method.invoke(pm, *args)
+            vdWakeLockToken = token
+            Log.i(TAG, "Holding wake lock for VD $displayId (display group $groupId)")
+        } catch (e: Exception) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.cause ?: e
+            Log.w(TAG, "VD wake lock failed: ${cause.javaClass.simpleName}: ${cause.message}")
+        }
+    }
+
+    private fun releaseVdWakeLock() {
+        val token = vdWakeLockToken ?: return
+        vdWakeLockToken = null
+        try {
+            val pm = powerManagerService ?: return
+            pm.javaClass.getMethod("releaseWakeLock", android.os.IBinder::class.java, Int::class.javaPrimitiveType)
+                .invoke(pm, token, 0)
+        } catch (e: Exception) {
+            Log.w(TAG, "VD wake lock release failed: ${e.message}")
         }
     }
 

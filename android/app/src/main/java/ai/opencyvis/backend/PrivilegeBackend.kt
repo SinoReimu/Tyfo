@@ -17,6 +17,7 @@ interface PrivilegeBackend {
     fun ensureVdHasContent(displayId: Int)
     fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int
     fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean
+    fun setVirtualDisplayAwake(awake: Boolean) {}
     fun destroy()
 }
 

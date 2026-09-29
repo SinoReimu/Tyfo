@@ -43,6 +43,7 @@ class AgentEngine(
     private val viewTreeProvider: ((Int, Int, Int) -> String?)? = null,
     private val shouldForwardScreenshot: (() -> Boolean)? = null,
     private val blacklistedPackages: Set<String> = emptySet(),
+    private val isScreenInteractive: (() -> Boolean)? = null,
     private val onSaveRoutine: ((
         name: String, icon: String, instruction: String,
         scheduleType: String?, scheduleTime: String?, scheduleRepeat: String?,
@@ -304,7 +305,11 @@ class AgentEngine(
                     Log.i(TAG, "FLAG_SECURE handoff triggered at step $step")
                     consecutiveBlackFrames = 0  // reset to prevent re-trigger if user resumes
 
-                    val reason = "I may not be able to see this screen — it appears to be privacy-protected. Please take over to handle this part."
+                    val reason = if (isScreenInteractive?.invoke() == false) {
+                        "I can't see the screen while the phone's screen is off or locked. Please wake/unlock the phone, then return control."
+                    } else {
+                        "I may not be able to see this screen — it appears to be privacy-protected. Please take over to handle this part."
+                    }
                     _state.value = AgentState.WaitingForHandoff(reason, step)
                     _stepResults.emit(
                         StepResult(step, "flag_secure_handoff", "Privacy-protected screen detected",

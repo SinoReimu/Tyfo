@@ -32,4 +32,7 @@ interface IPrivilegedService {
     /** Force-stop a package (shell uid). Used to dismiss split-screen by killing the
         adjacent Settings pane after ADB pairing completes. */
     void forceStopPackage(String packageName);
+
+    /** Keep the VD's own power group awake (while a task runs) even when the phone screen is off. */
+    void setVirtualDisplayAwake(boolean awake);
 }
