@@ -31,25 +31,33 @@ object PrivilegedServiceMain {
         val service = PrivilegedService()
         val binder = service.asBinder()
 
-        try {
-            sendBinderViaHiddenApi(authority, token, binder)
-            Log.i(TAG, "Binder sent to app via getContentProviderExternal, entering Looper")
+        val appBinder: IBinder? = try {
+            sendBinderViaHiddenApi(authority, token, binder).also {
+                Log.i(TAG, "Binder sent to app via getContentProviderExternal, entering Looper")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "getContentProviderExternal failed, trying ActivityThread fallback", e)
             try {
-                sendBinderViaActivityThread(authority, token, binder)
-                Log.i(TAG, "Binder sent to app via ActivityThread fallback, entering Looper")
+                sendBinderViaActivityThread(authority, token, binder).also {
+                    Log.i(TAG, "Binder sent to app via ActivityThread fallback, entering Looper")
+                }
             } catch (e2: Exception) {
                 Log.e(TAG, "Failed to send binder to app", e2)
                 return
             }
         }
 
-        // Self-terminate when the app dies (prevents orphaned privileged processes)
-        binder.linkToDeath({
-            Log.i(TAG, "App died, exiting privileged service")
-            System.exit(0)
-        }, 0)
+        // Self-terminate when the app dies. Must watch a binder living in the app process —
+        // linkToDeath on our own local binder never fires. Launched via su there is no ADB
+        // session teardown to kill us, so without this every app restart leaks a root process.
+        if (appBinder != null) {
+            appBinder.linkToDeath({
+                Log.i(TAG, "App died, exiting privileged service")
+                System.exit(0)
+            }, 0)
+        } else {
+            Log.w(TAG, "No app-side binder to watch; process will outlive the app")
+        }
 
         Looper.loop()
     }
@@ -58,7 +66,8 @@ object PrivilegedServiceMain {
      * Shizuku's approach: use IActivityManager.getContentProviderExternal() hidden API.
      * This works at shell uid without needing a full Application context.
      */
-    private fun sendBinderViaHiddenApi(authority: String, token: String, binder: IBinder) {
+    /** Returns the app's provider binder, whose death means the app process died. */
+    private fun sendBinderViaHiddenApi(authority: String, token: String, binder: IBinder): IBinder? {
         val bundle = Bundle().apply {
             putBinder("binder", binder)
             putString("token", token)
@@ -138,9 +147,10 @@ object PrivilegedServiceMain {
             }
         }
         if (!succeeded) throw IllegalStateException("All IContentProvider.call variants failed")
+        return provider.javaClass.getMethod("asBinder").invoke(provider) as? IBinder
     }
 
-    private fun sendBinderViaActivityThread(authority: String, token: String, binder: IBinder) {
+    private fun sendBinderViaActivityThread(authority: String, token: String, binder: IBinder): IBinder? {
         val bundle = Bundle().apply {
             putBinder("binder", binder)
             putString("token", token)
@@ -150,5 +160,14 @@ object PrivilegedServiceMain {
         val at = atClass.getMethod("systemMain").invoke(null)
         val app = atClass.getMethod("getApplication").invoke(at) as android.app.Application
         app.contentResolver.call(uri, "exchangeBinder", null, bundle)
+        return try {
+            val client = app.contentResolver.acquireUnstableContentProviderClient(uri) ?: return null
+            val provider = android.content.ContentProviderClient::class.java
+                .getDeclaredField("mContentProvider").apply { isAccessible = true }.get(client)
+            provider?.javaClass?.getMethod("asBinder")?.invoke(provider) as? IBinder
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get app provider binder: ${e.message}")
+            null
+        }
     }
 }
