@@ -1,5 +1,7 @@
 package ai.opencyvis.backend
 
+import android.os.Bundle
+import android.os.IBinder
 import android.util.Log
 import android.view.InputEvent
 import android.view.Surface
@@ -63,6 +65,14 @@ class SystemBackend : PrivilegeBackend {
 
     override fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean {
         return DisplayOps.moveTaskToDisplay(taskId, targetDisplayId)
+    }
+
+    override fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? {
+        return DisplayOps.getTopTaskOnDisplay(displayId, callerPackage)
+    }
+
+    override fun setActivityController(controller: IBinder?): Boolean {
+        return DisplayOps.setActivityController(controller)
     }
 
     override fun destroy() {}

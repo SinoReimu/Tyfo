@@ -672,7 +672,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
         checkCaller()
         return try {
             val intent = android.content.Intent.parseUri(intentUri, android.content.Intent.URI_INTENT_SCHEME)
-            val pkg = intent.component?.packageName
+            val pkg = intent.component?.packageName ?: intent.`package`
 
             // Pre-move: if the app already has a task on a different display,
             // move it to the target display BEFORE launching. This prevents
@@ -766,6 +766,16 @@ class PrivilegedService : IPrivilegedService.Stub() {
     override fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean {
         checkCaller()
         return DisplayOps.moveTaskToDisplay(taskId, targetDisplayId)
+    }
+
+    override fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): android.os.Bundle? {
+        checkCaller()
+        return DisplayOps.getTopTaskOnDisplay(displayId, callerPackage)
+    }
+
+    override fun setActivityController(controller: android.os.IBinder?): Boolean {
+        checkCaller()
+        return DisplayOps.setActivityController(controller)
     }
 
     // ── IME policy (delegates to DisplayOps) ──

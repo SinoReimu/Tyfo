@@ -50,6 +50,7 @@ class TaskDisplayGuard(
         private const val FALLBACK_SCAN_MS = 800L
         private const val PENDING_LAUNCH_MS = 3000L
         private const val RESCUE_COOLDOWN_MS = 2000L
+        private val QUICK_SCAN_DELAYS_MS = listOf(150L, 350L)
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -143,6 +144,35 @@ class TaskDisplayGuard(
 
     fun addControlledTasks(tasks: Collection<TaskSnapshot>) {
         tasks.forEach { addControlledTask(it) }
+    }
+
+    /**
+     * Guard only [taskId] (the task currently on the VD), releasing any task the agent has
+     * since left. Null releases everything.
+     */
+    fun setControlledTask(taskId: Int?) {
+        val changed = synchronized(lock) {
+            val next = setOfNotNull(taskId?.takeIf { it > 0 })
+            if (next == controlledTaskIds) return@synchronized false
+            controlledTaskIds.clear()
+            controlledTaskIds.addAll(next)
+            controlledPackages.clear()
+            recentRescues.keys.retainAll(next)
+            true
+        }
+        if (changed) Log.i(TAG, "Controlled task set to: $taskId")
+    }
+
+    /** Check Display 0 soon instead of waiting for the next fallback scan tick. */
+    fun requestScan() {
+        if (!running) return
+        scope.launch {
+            for (delayMs in QUICK_SCAN_DELAYS_MS) {
+                delay(delayMs)
+                if (!running) return@launch
+                scanForEscapedTasks()
+            }
+        }
     }
 
     fun removeControlledTask(taskId: Int) {

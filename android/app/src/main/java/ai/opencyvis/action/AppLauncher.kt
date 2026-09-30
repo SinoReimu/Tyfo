@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import ai.opencyvis.backend.PrivilegeBackend
 import ai.opencyvis.backend.RemoteBackend
+import ai.opencyvis.display.AppOccupancyController
 
 /**
  * Result of a launch attempt.
@@ -193,17 +194,31 @@ class AppLauncher(
      * Start an activity, routing through the backend if needed for display ownership.
      * Returns true on success.
      */
-    private fun startActivityForDisplay(intent: Intent): Boolean {
+    private fun startActivityForDisplay(intent: Intent): Boolean = AppOccupancyController.asAgentLaunch {
         if (useRemoteLaunch) {
             // Route through privileged service — shell uid can start on any display
             intent.addFlags(launchFlagsForDisplay(displayId))
+            pinToResolvedPackage(intent)
             val intentUri = intent.toUri(Intent.URI_INTENT_SCHEME)
             Log.i(TAG, "Launching via backend.startActivityOnDisplay (display=$displayId)")
-            return backend!!.startActivityOnDisplay(intentUri, displayId)
+            return@asAgentLaunch backend!!.startActivityOnDisplay(intentUri, displayId)
         }
         // Direct launch (system app or display 0)
         context.startActivity(intent, launchOptionsBundle())
-        return true
+        true
+    }
+
+    /**
+     * Give an implicit intent (e.g. ACTION_SETTINGS) its resolved package, so the privileged
+     * launcher can pull that app's existing Display 0 task onto the VD instead of opening a
+     * second copy next to the one the user has open. Ambiguous intents (chooser) are left alone.
+     */
+    private fun pinToResolvedPackage(intent: Intent) {
+        if (intent.component != null || intent.`package` != null) return
+        val resolved = context.packageManager
+            .resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            ?.activityInfo?.packageName ?: return
+        if (resolved != "android") intent.`package` = resolved
     }
 
     /**

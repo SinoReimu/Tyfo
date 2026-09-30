@@ -1,6 +1,8 @@
 package ai.opencyvis.backend
 
+import android.os.Bundle
 import android.os.DeadObjectException
+import android.os.IBinder
 import android.os.Parcel
 import android.os.SharedMemory
 import android.util.Log
@@ -130,6 +132,16 @@ class RemoteBackend(
     override fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean {
         return try { binder.moveTaskToDisplay(taskId, targetDisplayId) }
                catch (_: Exception) { false }
+    }
+
+    override fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? {
+        return try { binder.getTopTaskOnDisplay(displayId, callerPackage) }
+               catch (_: Exception) { null }
+    }
+
+    override fun setActivityController(controller: IBinder?): Boolean {
+        return try { binder.setActivityController(controller) }
+               catch (e: Exception) { Log.w(TAG, "setActivityController failed: ${e.message}"); false }
     }
 
     override fun destroy() {

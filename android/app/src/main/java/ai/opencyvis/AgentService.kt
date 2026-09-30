@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import android.graphics.Point
 import android.os.Handler
@@ -29,6 +30,8 @@ import ai.opencyvis.config.ConfigRepository
 import ai.opencyvis.db.AppDatabase
 import ai.opencyvis.db.ChatHistoryRepository
 import ai.opencyvis.db.GlobalMemoryRepository
+import ai.opencyvis.backend.DisplayOps
+import ai.opencyvis.display.AppOccupancyController
 import ai.opencyvis.display.TaskDisplayGuard
 import ai.opencyvis.display.TaskSnapshot
 import ai.opencyvis.display.VirtualDisplayManager
@@ -75,6 +78,7 @@ class AgentService : Service() {
         private const val HANDOFF_TIMEOUT_MS = 30_000L
         private const val HANDOFF_COUNTDOWN_SECONDS = 10
         private const val HANDOFF_SAMPLE_INTERVAL_MS = 1_000L
+        private const val OCCUPIED_TOAST_DEBOUNCE_MS = 2_000L
         const val EXTRA_FOCUS_ASK = "focus_ask_user"
         const val EXTRA_SHOW_HANDOFF = "show_handoff"
     }
@@ -102,7 +106,8 @@ class AgentService : Service() {
     val handoffUiState: StateFlow<HandoffUiState> = _handoffUiState.asStateFlow()
     private var virtualDisplayManager: VirtualDisplayManager? = null
     private var taskDisplayGuard: TaskDisplayGuard? = null
-    private var taskRescueInProgress = false
+    @Volatile private var occupancyController: AppOccupancyController? = null
+    private var lastOccupiedToast: Pair<String, Long>? = null
     private var agentWakeLock: PowerManager.WakeLock? = null
     private lateinit var config: ConfigRepository
     private lateinit var historyRepo: ChatHistoryRepository
@@ -219,8 +224,7 @@ class AgentService : Service() {
 
     override fun onDestroy() {
         App.agentService = null
-        taskDisplayGuard?.stop()
-        taskDisplayGuard = null
+        stopTaskDisplayGuard()
         handoffObserverJob?.cancel()
         handoffMonitorJob?.cancel()
         disconnectObserverJob?.cancel()
@@ -340,9 +344,7 @@ class AgentService : Service() {
         stateObserverJob?.cancel()
         handoffObserverJob?.cancel()
         handoffMonitorJob?.cancel()
-        taskDisplayGuard?.stop()
-        taskDisplayGuard = null
-        taskRescueInProgress = false
+        stopTaskDisplayGuard()
         activeHandoffStep = null
         _handoffUiState.value = HandoffUiState.Idle
         releaseAgentWakeLock()
@@ -814,7 +816,7 @@ class AgentService : Service() {
         // Observe step results
         historyObserverJob = scope.launch {
             eng.stepResults.collect { result ->
-                if (result.success && !result.completed && shouldRefreshControlledTasks(result)) {
+                if (!result.completed) {
                     refreshControlledTasksFromVd("step_${result.step}_${result.actionType}")
                 }
 
@@ -901,8 +903,8 @@ class AgentService : Service() {
                 }
                 if (wasRunning && (state is AgentState.Idle || state is AgentState.Error)) {
                     Log.i(TAG, "Task completed, keeping virtual display for user inspection")
-                    taskDisplayGuard?.stop()
-                    taskDisplayGuard = null
+                    // The VD keeps its last app, but the agent is done with it: release it.
+                    stopTaskDisplayGuard()
                     releaseAgentWakeLock()
 
                     // Update foreground notification + post completion notification if in background
@@ -961,9 +963,7 @@ class AgentService : Service() {
     }
 
     fun stopAgent() {
-        taskDisplayGuard?.stop()
-        taskDisplayGuard = null
-        taskRescueInProgress = false
+        stopTaskDisplayGuard()
         handoffMonitorJob?.cancel()
         handoffMonitorJob = null
         handoffObserverJob?.cancel()
@@ -1132,6 +1132,7 @@ class AgentService : Service() {
         }
         displayState = DisplayState.VIEW
         updateNotification("Viewing agent operation")
+        refreshControlledTasksFromVd("exit_takeover")
         Log.i(TAG, "Exited TAKEOVER → VIEW mode (agent resumed)")
     }
 
@@ -1159,59 +1160,98 @@ class AgentService : Service() {
     // ── VD task escape guard ─────────────────────────────────────────────
 
     private fun startTaskDisplayGuard(vdm: VirtualDisplayManager) {
-        taskDisplayGuard?.stop()
+        stopTaskDisplayGuard()
         taskDisplayGuard = TaskDisplayGuard(
             context = this,
             vdm = vdm,
             scope = scope,
             onEscape = { task -> handleControlledTaskEscape(task) }
         ).also { it.start() }
+        backend?.let { startAppOccupancy(it) }
     }
 
+    private fun stopTaskDisplayGuard() {
+        taskDisplayGuard?.stop()
+        taskDisplayGuard = null
+        stopAppOccupancy()
+    }
+
+    /**
+     * Gate launches of the app the agent is driving, so tapping its icon on the phone
+     * shows a toast instead of pulling the agent's task onto Display 0.
+     */
+    private fun startAppOccupancy(b: PrivilegeBackend) {
+        stopAppOccupancy()
+        val controller = AppOccupancyController(
+            onLaunchBlocked = { pkg -> showAppOccupiedToast(pkg) },
+            onOccupiedStart = { taskDisplayGuard?.requestScan() }
+        )
+        if (b.setActivityController(controller)) {
+            occupancyController = controller
+            Log.i(TAG, "App occupancy gate installed")
+        } else {
+            Log.w(TAG, "App occupancy gate unavailable, relying on TaskDisplayGuard only")
+        }
+    }
+
+    private fun stopAppOccupancy() {
+        val controller = occupancyController ?: return
+        occupancyController = null
+        controller.setOccupiedPackages(emptySet())
+        backend?.setActivityController(null)
+        Log.i(TAG, "App occupancy gate removed")
+    }
+
+    /**
+     * Occupy only the app currently on top of the VD. Anything the agent has left is
+     * released right away, and a VD showing its home screen occupies nothing.
+     */
     private fun refreshControlledTasksFromVd(reason: String) {
         val vdm = virtualDisplayManager ?: return
         if (!vdm.isCreated) return
         // Use backend (shell uid) for task queries — main process can't access hidden APIs on real devices
         val b = backend ?: return
-        val taskId = b.getTopTaskIdOnDisplay(vdm.displayId, packageName)
-        if (taskId <= 0) {
-            Log.i(TAG, "No controlled VD task found while refreshing ($reason)")
+        val top = b.getTopTaskOnDisplay(vdm.displayId, packageName)
+        val taskId = top?.getInt(DisplayOps.KEY_TASK_ID, -1) ?: -1
+        val basePackage = top?.getString(DisplayOps.KEY_BASE_PACKAGE)
+        // Home is judged by activity type server-side: resolving HOME from this app is
+        // subject to package visibility and can return Settings' FallbackHome.
+        val isHome = top?.getBoolean(DisplayOps.KEY_IS_HOME) == true
+        if (taskId <= 0 || basePackage == null || isHome) {
+            taskDisplayGuard?.setControlledTask(null)
+            occupancyController?.setOccupiedPackages(emptySet())
+            Log.d(TAG, "No app occupied on VD ($reason): top=#$taskId $basePackage home=$isHome")
             return
         }
-        taskDisplayGuard?.addControlledTaskId(taskId)
-        Log.d(TAG, "Refreshed controlled VD task ($reason): #$taskId")
-    }
-
-    private fun TaskSnapshot.isHomeTask(): Boolean {
-        val packages = setOfNotNull(basePackage, topPackage)
-        if (packages.isEmpty()) return false
-        return packages.any { it in homePackages() }
-    }
-
-    private fun homePackages(): Set<String> {
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        return setOfNotNull(packageManager.resolveActivity(intent, 0)?.activityInfo?.packageName)
-    }
-
-    private fun shouldRefreshControlledTasks(result: StepResult): Boolean {
-        if (result.actionType == "open_app") return true
-        return taskDisplayGuard?.controlledTaskIdsSnapshot()?.isNotEmpty() == true
+        taskDisplayGuard?.setControlledTask(taskId)
+        occupancyController?.setOccupiedPackages(setOf(basePackage))
+        Log.d(TAG, "Occupied VD task ($reason): #$taskId $basePackage")
     }
 
     private fun handleControlledTaskEscape(task: TaskSnapshot) {
-        if (taskRescueInProgress) return
         val vdm = virtualDisplayManager ?: return
         if (!vdm.isCreated) return
         if (task.containsPackage(packageName)) return
 
-        taskRescueInProgress = true
-        try {
-            // TaskDisplayGuard already did moveTaskToDisplay; just bring our UI back to front
-            Log.i(TAG, "Escape callback for task ${task.taskId}, bringing UI to front on Display 0")
-            bringOpenCyvisUiToFront()
-        } finally {
-            taskRescueInProgress = false
+        // TaskDisplayGuard already moved the task back to the VD, so Display 0 is back on
+        // whatever the user was using. Tell them why instead of pulling up our own UI.
+        Log.i(TAG, "Escape callback for task ${task.taskId}, returned to VD")
+        val pkg = task.basePackage ?: task.topPackage
+            ?: occupancyController?.occupiedPackages?.firstOrNull()
+        pkg?.let { showAppOccupiedToast(it) }
+    }
+
+    private fun showAppOccupiedToast(pkg: String) {
+        val now = SystemClock.uptimeMillis()
+        val last = lastOccupiedToast
+        if (last != null && last.first == pkg && now - last.second < OCCUPIED_TOAST_DEBOUNCE_MS) return
+        lastOccupiedToast = pkg to now
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (_: Exception) {
+            pkg
         }
+        Toast.makeText(this, getString(R.string.app_occupied_by_agent, label), Toast.LENGTH_SHORT).show()
     }
 
     private fun bringOpenCyvisUiToFrontAfterRescue() {

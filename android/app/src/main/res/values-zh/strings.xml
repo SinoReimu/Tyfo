@@ -253,4 +253,5 @@
     <string name="routine_longpress_save">保存为例行任务</string>
     <string name="routine_longpress_rerun">重新执行</string>
     <string name="routine_manage_schedule">设置定时</string>
+    <string name="app_occupied_by_agent">「%1$s」正在被 AI 操作中，任务结束后即可使用</string>
 </resources>

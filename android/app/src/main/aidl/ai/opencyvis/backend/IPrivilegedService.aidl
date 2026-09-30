@@ -1,5 +1,6 @@
 package ai.opencyvis.backend;
 
+import android.os.Bundle;
 import android.os.SharedMemory;
 import android.view.Surface;
 
@@ -35,4 +36,11 @@ interface IPrivilegedService {
 
     /** Keep the VD's own power group awake (while a task runs) even when the phone screen is off. */
     void setVirtualDisplayAwake(boolean awake);
+
+    /** Install (non-null) or clear (null) the system-wide activity controller. The binder must
+        speak the android.app.IActivityController wire protocol. */
+    boolean setActivityController(IBinder controller);
+
+    /** Top task on a display that isn't callerPackage's: {taskId, basePackage, topPackage}, or null. */
+    Bundle getTopTaskOnDisplay(int displayId, String callerPackage);
 }

@@ -1,6 +1,7 @@
 package ai.opencyvis.backend
 
 import android.content.ComponentName
+import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import android.view.Display
@@ -52,20 +53,69 @@ object DisplayOps {
     }
 
     fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int {
-        val atm = activityTaskManager ?: return -1
+        return getTopTaskOnDisplay(displayId, callerPackage)?.getInt(KEY_TASK_ID, -1) ?: -1
+    }
+
+    const val KEY_TASK_ID = "taskId"
+    const val KEY_BASE_PACKAGE = "basePackage"
+    const val KEY_TOP_PACKAGE = "topPackage"
+    const val KEY_IS_HOME = "isHome"
+    private const val ACTIVITY_TYPE_HOME = 2 // WindowConfiguration.ACTIVITY_TYPE_HOME
+
+    /** Top task on [displayId] whose base isn't [callerPackage], as a Bundle of KEY_* fields. */
+    fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? {
+        val atm = activityTaskManager ?: return null
         return try {
             val tasks = getTasksForDisplay(atm, displayId)
             for (t in tasks) {
                 if (t == null) continue
                 val taskId = readIntField(t, "taskId") ?: continue
+                // The pre-API-36 getTasks overloads return every display's tasks.
+                val taskDisplay = readIntField(t, "displayId")
+                if (taskDisplay != null && taskDisplay != displayId) continue
                 val baseActivity = readComponent(t, "baseActivity")
                     ?: readComponentFromGetter(t, "getBaseActivity")
-                if (baseActivity?.packageName != callerPackage) return taskId
+                if (baseActivity?.packageName == callerPackage) continue
+                val topActivity = readComponent(t, "topActivity")
+                    ?: readComponentFromGetter(t, "getTopActivity")
+                return Bundle().apply {
+                    putInt(KEY_TASK_ID, taskId)
+                    putString(KEY_BASE_PACKAGE, baseActivity?.packageName)
+                    putString(KEY_TOP_PACKAGE, topActivity?.packageName)
+                    putBoolean(KEY_IS_HOME, readIntField(t, "topActivityType") == ACTIVITY_TYPE_HOME)
+                }
             }
-            -1
+            null
         } catch (e: Exception) {
-            Log.e(TAG, "getTopTaskIdOnDisplay failed", e)
-            -1
+            Log.e(TAG, "getTopTaskOnDisplay failed", e)
+            null
+        }
+    }
+
+    // ── IActivityController (system-wide activity-start gate) ──────────
+
+    /**
+     * Install [controller] as the system's IActivityController, or clear it when null.
+     * Needs SET_ACTIVITY_WATCHER (shell/root). The binder is wrapped in the framework's
+     * own Stub.Proxy so AMS can call it across processes.
+     */
+    fun setActivityController(controller: IBinder?): Boolean {
+        return try {
+            val am = Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null)
+            val controllerClass = Class.forName("android.app.IActivityController")
+            val proxy = controller?.let {
+                Class.forName("android.app.IActivityController\$Stub")
+                    .getMethod("asInterface", IBinder::class.java)
+                    .invoke(null, it)
+            }
+            am!!.javaClass
+                .getMethod("setActivityController", controllerClass, Boolean::class.javaPrimitiveType)
+                .invoke(am, proxy, false)
+            Log.i(TAG, "Activity controller ${if (controller != null) "installed" else "cleared"}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "setActivityController failed", e)
+            false
         }
     }
 

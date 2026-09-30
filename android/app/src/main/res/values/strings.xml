@@ -298,4 +298,5 @@
     <string name="routine_longpress_save">Save as Routine</string>
     <string name="routine_longpress_rerun">Run Again</string>
     <string name="routine_manage_schedule">Set Schedule</string>
+    <string name="app_occupied_by_agent">%1$s is in use by the agent until its task ends</string>
 </resources>

@@ -1,5 +1,7 @@
 package ai.opencyvis.backend
 
+import android.os.Bundle
+import android.os.IBinder
 import android.view.InputEvent
 import android.view.Surface
 
@@ -18,6 +20,9 @@ interface PrivilegeBackend {
     fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int
     fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean
     fun setVirtualDisplayAwake(awake: Boolean) {}
+    fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? = null
+    /** Install (non-null) or clear (null) the system-wide IActivityController. */
+    fun setActivityController(controller: IBinder?): Boolean = false
     fun destroy()
 }
 
