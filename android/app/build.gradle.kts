@@ -1,7 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+}
+
+// Kept in gitignored local.properties so the preset API key never lands in git history.
+val localProps = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -29,6 +36,11 @@ android {
         versionCode = 201
         versionName = "2.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String", "PRESET_API_KEY",
+            "\"${localProps.getProperty("opencyvis.presetApiKey", "")}\""
+        )
 
         externalNativeBuild {
             cmake {
@@ -97,6 +109,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         viewBinding = true
         aidl = true
         prefab = true

@@ -67,6 +67,7 @@ object BackendDetector {
     private fun buildConnectorList(context: Context): List<ServiceConnector> {
         return listOf(
             ShizukuConnector(context),
+            RootConnector(context),
             DirectConnector(context),
         )
     }

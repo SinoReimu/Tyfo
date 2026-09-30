@@ -60,6 +60,9 @@ class ConfigRepositoryTest {
                 val default = invocation.getArgument<Boolean>(1)
                 prefsStore[key] as? Boolean ?: default
             }
+            on { contains(any()) } doAnswer { invocation ->
+                prefsStore.containsKey(invocation.getArgument<String>(0))
+            }
             on { edit() } doReturn mockEditor
         }
 
@@ -69,23 +72,30 @@ class ConfigRepositoryTest {
     }
 
     @Test
-    fun `default apiKey is empty string`() {
+    fun `first run seeds preset provider config`() {
+        val repo = ConfigRepository(mockContext)
+        assertEquals(ConfigRepository.PRESET_PROVIDER, repo.apiProvider)
+        assertEquals(ai.opencyvis.BuildConfig.PRESET_API_KEY, repo.apiKey)
+        assertEquals("ark-code-latest", repo.model)
+        assertEquals("https://ark.cn-beijing.volces.com/api/plan/v3", repo.baseUrl)
+    }
+
+    @Test
+    fun `existing config is not overwritten by preset`() {
+        prefsStore["api_provider"] = "anthropic"
+        prefsStore["model"] = "custom-model"
+        val repo = ConfigRepository(mockContext)
+        assertEquals("anthropic", repo.apiProvider)
+        assertEquals("custom-model", repo.model)
+    }
+
+    @Test
+    fun `getter fallbacks still use OpenAI defaults when keys are missing`() {
+        prefsStore["api_provider"] = "openai"
         val repo = ConfigRepository(mockContext)
         assertEquals("", repo.apiKey)
-    }
-
-    @Test
-    fun `default model is current OpenAI-compatible model`() {
-        val repo = ConfigRepository(mockContext)
         assertEquals(ConfigRepository.DEFAULT_MODEL, repo.model)
-        assertEquals("gpt-5.5", repo.model)
-    }
-
-    @Test
-    fun `default baseUrl is correct`() {
-        val repo = ConfigRepository(mockContext)
         assertEquals(ConfigRepository.DEFAULT_BASE_URL, repo.baseUrl)
-        assertEquals("https://api.openai.com/v1", repo.baseUrl)
     }
 
     @Test
@@ -154,6 +164,7 @@ class ConfigRepositoryTest {
     @Test
     fun `setting apiKey calls editor putString and apply`() {
         val repo = ConfigRepository(mockContext)
+        clearInvocations(mockEditor)
         repo.apiKey = "my-key"
         verify(mockEditor).putString(eq("api_key"), eq("my-key"))
         verify(mockEditor).apply()
@@ -162,6 +173,7 @@ class ConfigRepositoryTest {
     @Test
     fun `setting maxSteps calls editor putString and apply`() {
         val repo = ConfigRepository(mockContext)
+        clearInvocations(mockEditor)
         repo.maxSteps = 20
         verify(mockEditor).putString(eq("max_steps"), eq("20"))
         verify(mockEditor).apply()
@@ -170,6 +182,7 @@ class ConfigRepositoryTest {
     @Test
     fun `setting debugMode calls editor putBoolean and apply`() {
         val repo = ConfigRepository(mockContext)
+        clearInvocations(mockEditor)
         repo.debugMode = true
         verify(mockEditor).putBoolean(eq("debug_mode"), eq(true))
         verify(mockEditor).apply()

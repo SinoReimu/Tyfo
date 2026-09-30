@@ -254,10 +254,10 @@ class AgentService : Service() {
                             Log.w(TAG, "Backend disconnected while idle")
                         }
 
-                        // Shizuku is independent of wireless debugging. Only the direct
-                        // ADB connector should use adb_wifi_enabled as a retry condition.
+                        // Shizuku and root are independent of wireless debugging. Only the
+                        // direct ADB connector should use adb_wifi_enabled as a retry condition.
                         val wirelessOn = SetupStateDetector.isWirelessDebuggingEnabled(this@AgentService)
-                        val canRetry = b.connector.name == "shizuku" || wirelessOn
+                        val canRetry = b.connector.name == "shizuku" || b.connector.name == "root" || wirelessOn
                         if (canRetry) {
                             Log.i(TAG, "Attempting ${b.connector.name} backend reconnect...")
                             var reconnected = false

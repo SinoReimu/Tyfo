@@ -40,6 +40,10 @@ class ConfigRepository(context: Context) {
         const val DEFAULT_KIMI_BASE_URL = "https://api.moonshot.cn/v1"
         const val DEFAULT_MAX_STEPS = 100
 
+        const val PRESET_PROVIDER = PROVIDER_OPENAI
+        const val PRESET_MODEL = "ark-code-latest"
+        const val PRESET_BASE_URL = "https://ark.cn-beijing.volces.com/api/plan/v3"
+
         /** Returns true if model or url matches any known provider default.
          *  SettingsActivity uses this to decide whether to auto-fill defaults when
          *  the provider spinner changes. */
@@ -50,6 +54,18 @@ class ConfigRepository(context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    init {
+        // Seed on first run; otherwise SettingsFragment persists the XML defaultValues first.
+        if (!prefs.contains(KEY_API_PROVIDER)) {
+            prefs.edit()
+                .putString(KEY_API_PROVIDER, PRESET_PROVIDER)
+                .putString(KEY_API_KEY, ai.opencyvis.BuildConfig.PRESET_API_KEY)
+                .putString(KEY_MODEL, PRESET_MODEL)
+                .putString(KEY_BASE_URL, PRESET_BASE_URL)
+                .apply()
+        }
+    }
 
     /** Migrate a preference stored as Int to String (for EditTextPreference compat). */
     private fun migrateIntToString(key: String, default: Int): Int {
