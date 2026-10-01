@@ -122,9 +122,6 @@ android {
             // Bouncy Castle OSGI manifests conflict
             excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
-        jniLibs {
-            excludes += listOf("**/libonnxruntime.so", "**/libsherpa-onnx-jni.so")
-        }
     }
 }
 
@@ -139,13 +136,6 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-
-    // On-device streaming ASR. Sherpa 8.5.1's JNI library is linked against
-    // ONNX Runtime 1.24.3; exclude the stale transitive lib-onnx package.
-    implementation("com.bihe0832.android:lib-sherpa-onnx:8.5.1") {
-        exclude(group = "com.bihe0832.android", module = "lib-onnx")
-    }
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.24.3")
 
     // Lifecycle (process-wide foreground/background detection for OverlayService)
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")

@@ -276,4 +276,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). We welcome code, bug reports, security a
 
 ## Acknowledgments
 
-- [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) — on-device speech recognition (Apache 2.0)

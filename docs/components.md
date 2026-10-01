@@ -882,22 +882,17 @@ suspend fun deleteConversation(conversationId: Long)
 
 ## `voice/` — 语音输入
 
-### `SherpaOnnxSpeechInputEngine.kt`
+### `DoubaoStreamingSpeechInputEngine.kt`
 
-离线流式语音识别，基于 [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx)，用于 ControlPanelActivity / ViewActivity 中的语音指令输入。
+云端流式语音识别，用豆包流式语音识别模型 2.0（双向流式优化版），鉴权用 Agent 同一个火山方舟 key。用于长按电源键的语音助手、ControlPanelActivity / ViewActivity 的语音输入，以及系统语音识别服务 `AssistantRecognitionService`。
 
-**离线模型：** 中英双语流式 zipformer，int8 量化（约 60 MB），随 APK 打包在 `assets/asr/zh_en_small_int8/`：
-- `encoder-epoch-99-avg-1.int8.onnx` — 编码器（int8）
-- `decoder-epoch-99-avg-1.onnx` — 解码器
-- `joiner-epoch-99-avg-1.int8.onnx` — joiner（int8）
-- `bpe.model` — 分词器
-- `tokens.txt` — 字典
+**接口：** `wss://openspeech.bytedance.com/api/v3/plan/sauc/bigmodel_async`，请求头 `X-Api-Key`（Agent 的 key）+ `X-Api-Resource-Id: volc.seedasr.sauc.duration`。WebSocket 二进制帧：4 字节头 + [序号] + 4 字节长度 + 负载（大端，不压缩）；先发 JSON 参数，再每 200ms 发一包 16kHz/16bit/单声道 PCM，结束时发带“最后一包”标志的空包。
 
-**模型路径解析：** `SherpaOnnxModelFiles.kt` 列出五个 asset 文件，由 `SherpaOnnxSpeechInputEngine` 在初始化时解压到 app data dir 后供 native 库加载。文件清单的完整性由 JVM 单元测试 `SherpaOnnxModelFilesTest` 守护——任何缺失或路径漂移都会立即失败。
+**判停：** 开启二遍识别（`enable_nonstream`），静音超过 `end_window_size`（1000ms）由服务端判停，并用非流式模型重识别这一句、标 `definite=true`，拿到即作为最终结果。7 秒没识别出内容按“没听清”结束，单次最长 45 秒。连接建立前录到的音频先缓存，连上后补发。
 
-**接口：** 实现统一的 `SpeechInputEngine` SAM，UI 侧只感知 `start(callback)` / `stop()` / `release()` 三个方法。
+**接口：** 实现统一的 `SpeechInputEngine`，UI 侧只感知 `startListening(listener)` / `stopListening()` / `destroy()`。
 
-> **替换历史：** 早期使用 `AndroidSpeechInputEngine`（系统 `SpeechRecognizer` API），但在豆包 AOSP 上系统 ASR 服务缺失；切换到 Sherpa-ONNX 后离线可用、识别延迟和准确度均优于 Google ASR。
+> **替换历史：** 最早用系统 `SpeechRecognizer`（豆包 AOSP 上没有系统 ASR 服务）；之后换成 Sherpa-ONNX 离线小模型（中英双语 zipformer small），识别率偏低；现在改为云端识别，没网时 Agent 本身也用不了，所以不再保留离线模型。
 
 ---
 

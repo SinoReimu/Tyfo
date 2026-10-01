@@ -277,7 +277,6 @@
     <string name="assist_hint_typing">输入要交给 OpenCyvis 的任务</string>
     <string name="assist_no_match">没听清，轻点麦克风再说一次</string>
     <string name="assist_no_mic">没有麦克风权限，可以直接打字</string>
-    <string name="assist_no_model">语音模型还没下载，可以先打字</string>
     <string name="assist_submitting">正在交给 OpenCyvis…</string>
     <string name="assist_done_started">开始执行了，进度看顶部浮窗</string>
     <string name="assist_done_replaced">已停止旧任务，开始执行新的</string>
@@ -324,4 +323,9 @@
     <string name="vd_status_idle">空闲</string>
     <string name="cd_send">发送</string>
     <string name="cd_voice_input">语音输入</string>
+    <string name="asr_error_no_key">还没配置 API Key，用不了语音识别</string>
+    <string name="asr_error_auth">语音识别没有权限，检查 API Key 是否开通了豆包语音</string>
+    <string name="asr_error_network">连不上语音识别服务，检查一下网络</string>
+    <string name="asr_error_server">语音识别服务出错（%1$d）</string>
+    <string name="asr_error_mic">麦克风用不了</string>
 </resources>

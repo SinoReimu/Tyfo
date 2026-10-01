@@ -47,8 +47,8 @@ import ai.opencyvis.ui.fx.MonetPalette
 import ai.opencyvis.ui.fx.PanelFrameLayout
 import ai.opencyvis.ui.fx.ProgressLineView
 import ai.opencyvis.ui.fx.SpringInterpolator
-import ai.opencyvis.voice.SherpaOnnxModelFiles
-import ai.opencyvis.voice.SherpaOnnxSpeechInputEngine
+import ai.opencyvis.config.ConfigRepository
+import ai.opencyvis.voice.DoubaoStreamingSpeechInputEngine
 import ai.opencyvis.voice.SpeechInputEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -122,7 +122,7 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     private var phase = Phase.IDLE
     private var closing = false
     private var scope: CoroutineScope? = null
-    private var speech: SherpaOnnxSpeechInputEngine? = null
+    private var speech: DoubaoStreamingSpeechInputEngine? = null
     private var listening = false
     private var agentService: AgentService? = null
     private var bound = false
@@ -217,8 +217,8 @@ class AssistantPanel(private val context: Context, private val host: Host) {
         when {
             context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
                 enterTyping(context.getString(R.string.assist_no_mic))
-            !SherpaOnnxModelFiles.allFilesPresent(context.filesDir) ->
-                enterTyping(context.getString(R.string.assist_no_model))
+            ConfigRepository(context).apiKey.isBlank() ->
+                enterTyping(context.getString(R.string.asr_error_no_key))
             // 等胶囊铺开一半再开麦，开场动画不会被模型加载卡住
             else -> main.postDelayed({ startListening() }, 260)
         }
@@ -303,7 +303,7 @@ class AssistantPanel(private val context: Context, private val host: Host) {
         setCaption(null)
         orb.mode = AgentIconView.Mode.LISTENING
         showSuggestionsIfIdle()
-        val engine = speech ?: SherpaOnnxSpeechInputEngine(context).also { speech = it }
+        val engine = speech ?: DoubaoStreamingSpeechInputEngine(context).also { speech = it }
         listening = true
         renderMic()
         engine.startListening(speechListener)

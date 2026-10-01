@@ -4,29 +4,24 @@ import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognitionService
 import android.speech.SpeechRecognizer
-import ai.opencyvis.voice.SherpaOnnxModelFiles
-import ai.opencyvis.voice.SherpaOnnxSpeechInputEngine
+import ai.opencyvis.voice.DoubaoStreamingSpeechInputEngine
 import ai.opencyvis.voice.SpeechInputEngine
 
 /**
  * 数字助理必须带一个语音识别服务；选 OpenCyvis 当助理后，系统可能把默认识别器也切过来，
- * 所以这里用本地的 sherpa-onnx 模型给出真实可用的识别结果，而不是空壳。
+ * 所以这里用豆包流式语音识别（云端）给出真实可用的识别结果，而不是空壳。
  */
 class AssistantRecognitionService : RecognitionService() {
 
-    private var engine: SherpaOnnxSpeechInputEngine? = null
+    private var engine: DoubaoStreamingSpeechInputEngine? = null
     private var callback: Callback? = null
     private var lastPartial: String? = null
 
     override fun onStartListening(recognizerIntent: Intent?, listener: Callback) {
-        if (!SherpaOnnxModelFiles.allFilesPresent(filesDir)) {
-            runCatching { listener.error(SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) }
-            return
-        }
         release()
         callback = listener
         lastPartial = null
-        val e = SherpaOnnxSpeechInputEngine(this).also { engine = it }
+        val e = DoubaoStreamingSpeechInputEngine(this).also { engine = it }
         e.startListening(object : SpeechInputEngine.Listener {
             override fun onReady() {
                 runCatching {

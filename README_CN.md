@@ -276,4 +276,3 @@ adb shell am start -a android.intent.action.VIEW \
 
 ## 致谢
 
-- [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) — 设备端语音识别 (Apache 2.0)

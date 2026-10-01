@@ -192,7 +192,7 @@ NoneAvailable → 引导到 SetupActivity
 | `remoteim/` | Telegram / 飞书远程控制 |
 | `db/` | Room 数据库（对话历史、例行任务） |
 | `schedule/` | 定时任务调度（AlarmManager、地理围栏） |
-| `voice/` | Sherpa-ONNX 离线语音识别 |
+| `voice/` | 豆包流式语音识别（云端） |
 | `config/` | ConfigRepository（SharedPreferences） |
 
 ---

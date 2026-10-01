@@ -322,7 +322,6 @@
     <string name="assist_hint_typing">Type a task for OpenCyvis</string>
     <string name="assist_no_match">Didn’t catch that. Tap the mic to try again</string>
     <string name="assist_no_mic">Microphone not allowed, you can type instead</string>
-    <string name="assist_no_model">Speech model not downloaded yet, you can type instead</string>
     <string name="assist_submitting">Handing it to OpenCyvis…</string>
     <string name="assist_done_started">On it. Progress is in the island at the top</string>
     <string name="assist_done_replaced">Stopped the old task and started this one</string>
@@ -369,4 +368,9 @@
     <string name="vd_status_idle">Idle</string>
     <string name="cd_send">Send</string>
     <string name="cd_voice_input">Voice input</string>
+    <string name="asr_error_no_key">No API key set, speech recognition is unavailable</string>
+    <string name="asr_error_auth">Speech recognition not authorized; check that the API key has Doubao speech enabled</string>
+    <string name="asr_error_network">Couldn\'t reach the speech service, check the network</string>
+    <string name="asr_error_server">Speech service error (%1$d)</string>
+    <string name="asr_error_mic">Microphone is unavailable</string>
 </resources>
