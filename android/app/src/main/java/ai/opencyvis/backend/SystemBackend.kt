@@ -44,21 +44,6 @@ class SystemBackend : PrivilegeBackend {
         return false  // Caller will fall through to normal Context.startActivity path
     }
 
-    override fun ensureVdHasContent(displayId: Int) {
-        // Launch home on the specified display to ensure a frame renders
-        try {
-            val cmd = arrayOf(
-                "am", "start", "--display", displayId.toString(),
-                "-a", "android.intent.action.MAIN",
-                "-c", "android.intent.category.HOME"
-            )
-            Runtime.getRuntime().exec(cmd).waitFor()
-            Log.i(TAG, "ensureVdHasContent: launched home on display $displayId")
-        } catch (e: Exception) {
-            Log.w(TAG, "ensureVdHasContent failed: ${e.message}")
-        }
-    }
-
     override fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int {
         return DisplayOps.getTopTaskIdOnDisplay(displayId, callerPackage)
     }
@@ -69,6 +54,10 @@ class SystemBackend : PrivilegeBackend {
 
     override fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? {
         return DisplayOps.getTopTaskOnDisplay(displayId, callerPackage)
+    }
+
+    override fun removeTasksOnDisplay(displayId: Int): IntArray {
+        return DisplayOps.removeTasksOnDisplay(displayId)
     }
 
     override fun setActivityController(controller: IBinder?): Boolean {

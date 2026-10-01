@@ -138,6 +138,7 @@ class OverlayService : Service() {
             prepare()
         }
 
+        ai.opencyvis.accessibility.VdAccessibilityService.connectionListeners.add(a11yListener)
         application.registerActivityLifecycleCallbacks(activityCallbacks)
         ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
 
@@ -145,7 +146,10 @@ class OverlayService : Service() {
         bindService(intent, connection, Context.BIND_AUTO_CREATE)
     }
 
+    private val a11yListener: () -> Unit = { overlayWindow?.onAccessibilityHostChanged() }
+
     override fun onDestroy() {
+        ai.opencyvis.accessibility.VdAccessibilityService.connectionListeners.remove(a11yListener)
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
         application.unregisterActivityLifecycleCallbacks(activityCallbacks)
         overlayWindow?.dismiss()

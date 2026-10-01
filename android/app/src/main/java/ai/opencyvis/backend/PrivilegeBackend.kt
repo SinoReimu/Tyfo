@@ -16,13 +16,14 @@ interface PrivilegeBackend {
     fun setVirtualDisplaySurface(surface: Surface?)
     fun setDisplayImePolicy(displayId: Int, policy: Int)
     fun startActivityOnDisplay(intentUri: String, displayId: Int): Boolean
-    fun ensureVdHasContent(displayId: Int)
     fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int
     fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean
     fun setVirtualDisplayAwake(awake: Boolean) {}
     fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): Bundle? = null
     /** Install (non-null) or clear (null) the system-wide IActivityController. */
     fun setActivityController(controller: IBinder?): Boolean = false
+    /** 移除某块屏上的所有非桌面任务（像在最近任务里划掉），返回被移除的任务 id。 */
+    fun removeTasksOnDisplay(displayId: Int): IntArray = IntArray(0)
     fun destroy()
 }
 

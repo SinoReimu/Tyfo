@@ -254,4 +254,63 @@
     <string name="routine_longpress_rerun">重新执行</string>
     <string name="routine_manage_schedule">设置定时</string>
     <string name="app_occupied_by_agent">「%1$s」正在被 AI 操作中，任务结束后即可使用</string>
+    <!-- 单任务闸门 / 虚拟屏生命周期 -->
+    <string name="task_busy_toast">还有任务在执行：%1$s</string>
+    <string name="task_skipped_title">定时任务已跳过</string>
+    <string name="task_skipped_busy">当时有别的任务在执行，这次没有运行「%1$s」</string>
+    <string name="backend_connecting_toast">正在连接特权服务，请稍后再试</string>
+    <string name="task_start_failed_backend">特权服务未连接，任务没能启动</string>
+    <string name="task_start_failed_display">虚拟屏创建失败，任务没能启动</string>
+    <string name="vd_released">上次任务的画面已回收</string>
+
+    <!-- 任务浮窗（灵动岛） -->
+    <string name="island_step">第 %1$d 步</string>
+    <string name="island_waiting_answer">需要你回答</string>
+    <string name="island_waiting_handoff">需要你接管</string>
+    <string name="island_done">任务完成</string>
+    <string name="island_failed">任务失败</string>
+    <string name="island_open">查看画面</string>
+    <string name="island_answer">去回答</string>
+    <string name="island_takeover">去接管</string>
+
+    <!-- 语音助手（长按电源键） -->
+    <string name="assist_hint_idle">想让我帮你做什么？</string>
+    <string name="assist_hint_busy">说点什么，补充给当前任务</string>
+    <string name="assist_hint_answer">直接说出你的回答</string>
+    <string name="assist_hint_typing">输入要交给 OpenCyvis 的任务</string>
+    <string name="assist_no_match">没听清，轻点麦克风再说一次</string>
+    <string name="assist_no_mic">没有麦克风权限，可以直接打字</string>
+    <string name="assist_no_model">语音模型还没下载，可以先打字</string>
+    <string name="assist_submitting">正在交给 OpenCyvis…</string>
+    <string name="assist_done_started">开始执行了，进度看顶部浮窗</string>
+    <string name="assist_done_replaced">已停止旧任务，开始执行新的</string>
+    <string name="assist_done_supplemented">已补充给当前任务</string>
+    <string name="assist_done_answered">已回答</string>
+    <string name="assist_done_stopped">已停止当前任务</string>
+    <string name="assist_choice_caption">当前还有任务在执行，这句话要怎么处理？</string>
+    <string name="assist_choice_supplement">补充给当前任务</string>
+    <string name="assist_choice_replace">停止它，改做这个</string>
+    <string name="assist_task_running">第 %1$d 步 · 执行中</string>
+    <string name="assist_task_starting">正在启动</string>
+    <string name="assist_task_waiting_answer">等你回答</string>
+    <string name="assist_task_waiting_handoff">等你接管</string>
+    <string name="assist_task_view">查看</string>
+    <string name="assist_cd_keyboard">改成打字</string>
+    <string name="assist_cd_mic">说话</string>
+    <string name="pref_category_assistant">语音助手</string>
+    <string name="pref_assistant_title">长按电源键唤起 OpenCyvis</string>
+    <string name="pref_assistant_summary_off">未开启：点此前往系统设置，把「默认数字助理应用」选为 OpenCyvis</string>
+    <string name="pref_assistant_summary_on">已开启：长按电源键即可语音下达任务</string>
+    <string name="pref_assistant_guide">在「数字助理应用」里选择 OpenCyvis</string>
+    <string name="assist_tracking_locked">屏幕锁定中，进度会实时显示在这里</string>
+    <string name="assist_tracking_done">任务完成：%1$s</string>
+    <string name="notif_channel_progress">任务进度</string>
+    <string name="notif_channel_progress_desc">正在执行的任务的实时进度，锁屏上也能看到</string>
+    <string name="notif_progress_step">第 %1$d 步</string>
+    <string name="notif_progress_short">第%1$d步</string>
+    <string name="notif_progress_public_title">OpenCyvis 正在执行任务</string>
+    <string name="pref_island_a11y_title">用辅助功能显示任务浮窗</string>
+    <string name="pref_island_a11y_summary_off">未开启：浮窗在锁屏和系统设置页会被隐藏。点此开启 OpenCyvis 无障碍服务</string>
+    <string name="pref_island_a11y_summary_on">已开启：浮窗在锁屏和系统设置页之上也能显示</string>
+    <string name="island_collapse">收起</string>
 </resources>

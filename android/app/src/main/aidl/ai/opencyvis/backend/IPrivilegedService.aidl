@@ -27,9 +27,6 @@ interface IPrivilegedService {
 
     boolean startActivityOnDisplay(String intentUri, int displayId);
 
-    /** Launch home/launcher on a display to ensure something renders (recovery for empty VD). */
-    void ensureVdHasContent(int displayId);
-
     /** Force-stop a package (shell uid). Used to dismiss split-screen by killing the
         adjacent Settings pane after ADB pairing completes. */
     void forceStopPackage(String packageName);
@@ -43,4 +40,7 @@ interface IPrivilegedService {
 
     /** Top task on a display that isn't callerPackage's: {taskId, basePackage, topPackage}, or null. */
     Bundle getTopTaskOnDisplay(int displayId, String callerPackage);
+
+    /** Remove every non-home task on a display (same as swiping them away in Recents); returns their ids. */
+    int[] removeTasksOnDisplay(int displayId);
 }

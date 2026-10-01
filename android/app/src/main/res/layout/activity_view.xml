@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/view_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/surface">
+    android:background="#FF000000">
 
-    <!-- SurfaceView renders VD content full-screen -->
+    <!-- SurfaceView renders VD content, fitted between the status bar and the nav bar -->
     <SurfaceView
         android:id="@+id/surface_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:layout_gravity="top|center_horizontal" />
 
     <EditText
         android:id="@+id/takeover_keyboard_proxy"
@@ -21,12 +23,11 @@
         android:inputType="textMultiLine|textNoSuggestions"
         android:imeOptions="flagNoExtractUi" />
 
-    <!-- Animated glow border: shows when agent is actively operating -->
-    <ai.opencyvis.ui.GlowBorderView
+    <!-- Edge light (marquee): follows the agent state -->
+    <ai.opencyvis.ui.fx.EdgeLightView
         android:id="@+id/glow_border"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:layout_height="match_parent" />
 
     <!-- Touch interceptor: blocks touches in VIEW mode, invisible -->
     <View

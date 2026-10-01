@@ -58,7 +58,7 @@ class AgentEngine(
         private const val VD_CAPTURE_MAX_ATTEMPTS = 8
         private const val VD_CAPTURE_RETRY_DELAY_MS = 300L
         private const val VD_IMAGE_READER_TIMEOUT_MS = 600L
-        private const val VD_CAPTURE_RECOVERY_THRESHOLD = 3  // Launch home on VD after this many failures
+        private const val VD_CAPTURE_RECOVERY_THRESHOLD = 3  // Check for an empty VD after this many failures
 
         /**
          * System prompt. Ported from cli_demo.py SYSTEM_PROMPT (lines 286-302).
@@ -113,6 +113,10 @@ class AgentEngine(
         _state.value = AgentState.Running(step, thought)
     }
 
+    /** 执行循环还在跑（含暂停、等用户回答 / 接管），即任务还没结束。 */
+    val isLoopActive: Boolean
+        get() = agentJob?.isActive == true
+
     /**
      * Start the agent with the given instruction.
      */
@@ -131,6 +135,9 @@ class AgentEngine(
      * Pause the agent loop.
      */
     fun pause() {
+        // 任务已经结束（比如结束后才进来接管）就不动状态：没有循环会再把 Paused 改回来，
+        // 结果会一直停在 Paused，光效熄灭、虚拟屏也因为“任务还在”而不回收
+        if (!isLoopActive) return
         paused = true
         _state.value = AgentState.Paused
     }
@@ -289,7 +296,14 @@ class AgentEngine(
                 // privacy-protected screen. Use strict check (all sampled pixels == 0x000000)
                 // to avoid false positives from app transition animations which have
                 // status bar / navigation bar colors.
-                if (isBitmapStrictlyBlack(screenshotBase64)) {
+                // An empty VD (its last app closed) is simply black, which isn't a
+                // privacy-protected screen.
+                val strictlyBlack = isBitmapStrictlyBlack(screenshotBase64)
+                val emptyVd = strictlyBlack && vdm != null &&
+                    withContext(Dispatchers.IO) { vdm.getTopTaskIdOnDisplay(vdm.displayId) } == null
+                if (emptyVd) {
+                    consecutiveBlackFrames = 0
+                } else if (strictlyBlack) {
                     consecutiveBlackFrames++
                     Log.d(TAG, "Strictly black frame detected ($consecutiveBlackFrames consecutive, lastNonBlack=$lastNonBlackStep)")
                 } else {
@@ -712,8 +726,8 @@ class AgentEngine(
      *    fall back to ImageReader capture which reads directly from the VD's
      *    own surface and works on all API levels.
      *
-     * Recovery: After 3 consecutive failures, launches home on the VD to ensure
-     * an Activity is rendered (fixes empty VD state after failed app launch).
+     * Recovery: with no app on the VD there may be no frame at all. After 3 consecutive
+     * failures on an empty VD, hand the model a blank frame so it opens an app.
      */
     private suspend fun captureVirtualDisplay(vdm: VirtualDisplayManager, step: Int): String? {
         for (attempt in 1..VD_CAPTURE_MAX_ATTEMPTS) {
@@ -746,15 +760,14 @@ class AgentEngine(
             }
             Log.w(TAG, "Step $step: backend capture returned null")
 
-            // Recovery: after 3 failed attempts, launch home on VD to ensure content renders
+            // Recovery: an empty VD shows nothing. Don't launch HOME — a VD without home support
+            // can't host it and the system would open the launcher on the phone's own screen.
             if (attempt == VD_CAPTURE_RECOVERY_THRESHOLD) {
-                val topTask = vdm.getTopTaskIdOnDisplay(vdm.displayId)
+                val topTask = withContext(Dispatchers.IO) { vdm.getTopTaskIdOnDisplay(vdm.displayId) }
                 if (topTask == null || topTask <= 0) {
-                    Log.w(TAG, "VD empty after $attempt capture failures, launching home")
-                    withContext(Dispatchers.IO) {
-                        ScreenCapture.backend.ensureVdHasContent(vdm.displayId)
-                    }
-                    delay(1000)  // Wait for home to render a frame
+                    Log.w(TAG, "VD empty after $attempt capture failures, using a blank frame")
+                    val blank = Bitmap.createBitmap(vdm.width.coerceAtLeast(1), vdm.height.coerceAtLeast(1), Bitmap.Config.RGB_565)
+                    return ScreenCapture.captureBase64(virtualDisplayBitmap = blank)
                 } else {
                     Log.w(TAG, "VD has task $topTask but no new frame — using cached frame")
                 }

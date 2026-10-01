@@ -26,6 +26,8 @@ class ActionExecutor(
 
     private val inputInjector = InputInjector(context, displayId, displaySize, backend)
     private val appLauncher = AppLauncher(context, displayId, backend)
+    /** Keys that don't work on the virtual display (home / recents); see [execute]. */
+    private val vdUnsupportedKeys = setOf("home", "recent")
     private val launcherPackage: String? by lazy {
         val intent = android.content.Intent(android.content.Intent.ACTION_MAIN)
             .addCategory(android.content.Intent.CATEGORY_HOME)
@@ -98,8 +100,14 @@ class ActionExecutor(
                 }
 
                 is Action.KeyEvent -> {
-                    val ok = inputInjector.keyEvent(action.key)
-                    ok to "Key event: ${action.key}"
+                    if (displayId != 0 && action.key in vdUnsupportedKeys) {
+                        // An injected HOME does nothing on the VD, and recents isn't per display;
+                        // tell the model to use open_app rather than let it retry.
+                        false to "Home and recent keys don't work on the virtual display. Use open_app to switch apps, or back to leave the current screen."
+                    } else {
+                        val ok = inputInjector.keyEvent(action.key)
+                        ok to "Key event: ${action.key}"
+                    }
                 }
 
                 is Action.TypeText -> {

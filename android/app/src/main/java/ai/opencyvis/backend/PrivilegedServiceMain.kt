@@ -53,6 +53,7 @@ object PrivilegedServiceMain {
         if (appBinder != null) {
             appBinder.linkToDeath({
                 Log.i(TAG, "App died, exiting privileged service")
+                service.onOwnerDied()
                 System.exit(0)
             }, 0)
         } else {

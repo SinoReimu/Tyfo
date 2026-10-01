@@ -43,6 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Calendar
@@ -258,9 +259,10 @@ class ControlPanelActivity : AppCompatActivity() {
                     2 -> showSaveRoutineDialog(message)
                     3 -> {
                         val service = agentService ?: return@setOnMenuItemClickListener true
-                        chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, message.text))
                         ensureServiceStarted()
-                        service.startAgent(message.text)
+                        if (startTaskOrExplain(service, message.text)) {
+                            chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, message.text))
+                        }
                     }
                 }
                 true
@@ -298,18 +300,7 @@ class ControlPanelActivity : AppCompatActivity() {
                     editInput.hint = getString(R.string.supplement_hint)
                 }
                 else -> {
-                    // Check if backend is available before starting agent
-                    val backendName = service.activeBackendName
-                    if (backendName == null || backendName == "none") {
-                        // No backend connected — launch setup wizard
-                        setupLaunched = true
-                        @Suppress("DEPRECATION")
-                        startActivityForResult(
-                            Intent(this, SetupActivity::class.java),
-                            REQUEST_SETUP
-                        )
-                        return@setOnClickListener
-                    }
+                    if (!ensureBackendOrSetup(service)) return@setOnClickListener
                     // Check overlay permission before starting agent task
                     if (!android.provider.Settings.canDrawOverlays(this)) {
                         androidx.appcompat.app.AlertDialog.Builder(this)
@@ -326,11 +317,11 @@ class ControlPanelActivity : AppCompatActivity() {
                             .setNegativeButton(R.string.routine_ai_dismiss_btn, null)
                             .show()
                     }
-                    chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, text))
                     ensureServiceStarted()
+                    if (!startTaskOrExplain(service, text)) return@setOnClickListener
+                    chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, text))
                     lastInstruction = text
                     hasVdContent = false
-                    service.startAgent(text)
                     editInput.text.clear()
                     actionButtons.visibility = View.VISIBLE
                     hideRoutines()
@@ -466,11 +457,29 @@ class ControlPanelActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    /**
+     * 没有可用的特权后端时：还在连 root 就提示稍等，否则打开引导页。返回 true 表示可以开始任务。
+     */
+    private fun ensureBackendOrSetup(service: AgentService): Boolean {
+        val backendName = service.activeBackendName
+        if (backendName != null && backendName != "none") return true
+        if (service.backendDetecting.value) {
+            Toast.makeText(this, R.string.backend_connecting_toast, Toast.LENGTH_SHORT).show()
+            return false
+        }
+        setupLaunched = true
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(this, SetupActivity::class.java), REQUEST_SETUP)
+        return false
+    }
+
     private fun checkBackendAndPromptSetup(service: AgentService?) {
-        // Delay check to allow backend detection to complete
+        service ?: return
+        // Wait for the startup detection (root needs the su grant plus starting the
+        // service) instead of guessing with a fixed delay.
         scope.launch {
-            kotlinx.coroutines.delay(3000)
-            val backendName = service?.activeBackendName
+            service.backendDetecting.first { !it }
+            val backendName = service.activeBackendName
             if (backendName == null || backendName == "none") {
                 // No backend — launch setup wizard on first run
                 val prefs = getSharedPreferences("opencyvis_config", MODE_PRIVATE)
@@ -564,6 +573,14 @@ class ControlPanelActivity : AppCompatActivity() {
         if (!bound) {
             bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
+    }
+
+    /** 同一时间只跑一个任务：被占用时提示正在执行什么，返回 false。 */
+    private fun startTaskOrExplain(service: AgentService, instruction: String): Boolean {
+        if (service.startAgent(instruction) == AgentService.StartResult.STARTED) return true
+        val running = service.currentInstruction.ifBlank { getString(R.string.app_name) }
+        Toast.makeText(this, getString(R.string.task_busy_toast, running.take(24)), Toast.LENGTH_SHORT).show()
+        return false
     }
 
     private fun stopAgent() {
@@ -813,11 +830,14 @@ class ControlPanelActivity : AppCompatActivity() {
         val service = agentService
         if (service != null) {
             val backendName = service.activeBackendName
-            if (backendName == null || backendName == "none") {
+            if ((backendName == null || backendName == "none") && !service.backendDetecting.value) {
                 val shizukuPresent =
                     ai.opencyvis.backend.ShizukuConnector.status() !=
                         ai.opencyvis.backend.ShizukuStatus.UNAVAILABLE
-                if (shizukuPresent || ai.opencyvis.backend.SetupStateDetector.isWirelessDebuggingEnabled(this)) {
+                // Root is retried by the setup screen, wireless ADB only once the user picked it.
+                val wirelessReady = ai.opencyvis.backend.SetupStateDetector.isWirelessAdbChosen(this) &&
+                    ai.opencyvis.backend.SetupStateDetector.isWirelessDebuggingEnabled(this)
+                if (shizukuPresent || wirelessReady) {
                     scope.launch {
                         Log.i(TAG, "A privilege backend is available, retrying detection...")
                         val success = service.retryBackendDetection()
@@ -978,24 +998,14 @@ class ControlPanelActivity : AppCompatActivity() {
         val instrResId = resources.getIdentifier(routine.instruction, "string", packageName)
         val instruction = if (instrResId != 0) getString(instrResId) else routine.instruction
 
-        // Check if backend is available before starting agent
-        val backendName = service.activeBackendName
-        if (backendName == null || backendName == "none") {
-            setupLaunched = true
-            @Suppress("DEPRECATION")
-            startActivityForResult(
-                Intent(this, SetupActivity::class.java),
-                REQUEST_SETUP
-            )
-            return
-        }
+        if (!ensureBackendOrSetup(service)) return
 
         // Send instruction to agent
-        chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, instruction))
         ensureServiceStarted()
+        if (!startTaskOrExplain(service, instruction)) return
+        chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, instruction))
         lastInstruction = instruction
         hasVdContent = false
-        service.startAgent(instruction)
         editInput.text.clear()
         actionButtons.visibility = View.VISIBLE
         hideRoutines()

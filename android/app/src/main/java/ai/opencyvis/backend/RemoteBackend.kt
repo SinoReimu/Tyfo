@@ -119,11 +119,6 @@ class RemoteBackend(
                catch (_: Exception) { false }
     }
 
-    override fun ensureVdHasContent(displayId: Int) {
-        try { binder.ensureVdHasContent(displayId) }
-        catch (_: Exception) {}
-    }
-
     override fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String): Int {
         return try { binder.getTopTaskIdOnDisplay(displayId, callerPackage) }
                catch (_: Exception) { -1 }
@@ -142,6 +137,11 @@ class RemoteBackend(
     override fun setActivityController(controller: IBinder?): Boolean {
         return try { binder.setActivityController(controller) }
                catch (e: Exception) { Log.w(TAG, "setActivityController failed: ${e.message}"); false }
+    }
+
+    override fun removeTasksOnDisplay(displayId: Int): IntArray {
+        return try { binder.removeTasksOnDisplay(displayId) ?: IntArray(0) }
+               catch (e: Exception) { Log.w(TAG, "removeTasksOnDisplay failed: ${e.message}"); IntArray(0) }
     }
 
     override fun destroy() {

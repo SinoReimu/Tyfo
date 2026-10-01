@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Makes OpenCyvis selectable as the system digital assistant (long-press power). -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:recognitionService="ai.opencyvis.assistant.AssistantRecognitionService"
+    android:sessionService="ai.opencyvis.assistant.AssistantSessionService"
+    android:settingsActivity="ai.opencyvis.SettingsActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false" />

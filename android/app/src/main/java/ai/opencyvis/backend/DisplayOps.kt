@@ -92,6 +92,58 @@ object DisplayOps {
         }
     }
 
+    /**
+     * 移除 [displayId] 上所有非桌面任务，效果等同于在最近任务里划掉。释放虚拟屏前调用：
+     * 否则系统会把虚拟屏上的任务挪到主屏最顶上，应用突然跳到用户眼前。
+     * 移除是异步的（Activity 要走完关闭流程），所以会阻塞等到这块屏上的任务真正清空（最多 1.5 秒）
+     * 再返回；不等的话，紧接着释放虚拟屏时还没关完的任务仍会被挪到主屏最前面闪一下。
+     */
+    fun removeTasksOnDisplay(displayId: Int): IntArray {
+        val atm = activityTaskManager ?: return IntArray(0)
+        val removed = mutableListOf<Int>()
+        try {
+            val remove = atm.javaClass.getMethod("removeTask", Int::class.javaPrimitiveType)
+            for (t in getTasksForDisplay(atm, displayId)) {
+                if (t == null) continue
+                val taskId = readIntField(t, "taskId") ?: continue
+                val taskDisplay = readIntField(t, "displayId")
+                if (taskDisplay != null && taskDisplay != displayId) continue
+                if (readIntField(t, "topActivityType") == ACTIVITY_TYPE_HOME) continue
+                if (remove.invoke(atm, taskId) as? Boolean != false) removed += taskId
+            }
+            val start = android.os.SystemClock.uptimeMillis()
+            var left = remaining(atm, displayId)
+            while (left > 0 && android.os.SystemClock.uptimeMillis() - start < 1500) {
+                Thread.sleep(50)
+                left = remaining(atm, displayId)
+            }
+            Log.i(TAG, "removeTasksOnDisplay($displayId): $removed, left=$left after ${android.os.SystemClock.uptimeMillis() - start}ms")
+        } catch (e: Exception) {
+            Log.e(TAG, "removeTasksOnDisplay($displayId) failed", e)
+        }
+        return removed.toIntArray()
+    }
+
+    /**
+     * [displayId] 上还剩几个非桌面的根任务。getTasks 会跳过“只剩正在关闭的 Activity”的任务，
+     * 可那种任务的容器还在，这时释放虚拟屏它照样会被挪到主屏最前面闪一下；
+     * 所以优先用 getAllRootTaskInfosOnDisplay（任务容器还在就会列出来），拿不到再退回 getTasks。
+     */
+    private fun remaining(atm: Any, displayId: Int): Int {
+        val roots = try {
+            atm.javaClass.getMethod("getAllRootTaskInfosOnDisplay", Int::class.javaPrimitiveType)
+                .invoke(atm, displayId) as? List<*>
+        } catch (_: Exception) {
+            null
+        }
+        val tasks = roots ?: getTasksForDisplay(atm, displayId)
+        return tasks.count { t ->
+            t != null && (readIntField(t, "displayId") ?: displayId) == displayId &&
+                readIntField(t, "topActivityType") != ACTIVITY_TYPE_HOME &&
+                readIntField(t, "activityType") != ACTIVITY_TYPE_HOME
+        }
+    }
+
     // ── IActivityController (system-wide activity-start gate) ──────────
 
     /**

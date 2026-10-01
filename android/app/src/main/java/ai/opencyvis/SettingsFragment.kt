@@ -74,6 +74,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setupPairingPreferences()
         setupUnpairPreferences()
         setupBackendPreferences()
+        setupAssistantPreference()
         setupVersionInfo()
         refreshPairStatus("telegram")
         refreshPairStatus("feishu")
@@ -719,6 +720,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val backendName = App.agentService?.activeBackendName
         statusPref.summary = when (backendName) {
             "system"     -> "System App (full capabilities)"
+            "root"       -> "Root — tap to change"
             "shizuku"    -> "Shizuku — tap to change"
             "adb-direct" -> "ADB Direct — tap to change"
             null, "none" -> "Not connected — tap to set up"
@@ -798,6 +800,55 @@ class SettingsFragment : PreferenceFragmentCompat() {
     override fun onResume() {
         super.onResume()
         refreshBackendStatus()
+        refreshAssistantSummary()
+    }
+
+    // --- Voice assistant (long-press power) ---
+
+    private fun setupAssistantPreference() {
+        findPreference<Preference>("assistant_power_key")?.setOnPreferenceClickListener {
+            if (!ai.opencyvis.assistant.AssistantRole.isHeld(requireContext())) {
+                Toast.makeText(requireContext(), R.string.pref_assistant_guide, Toast.LENGTH_LONG).show()
+            }
+            ai.opencyvis.assistant.AssistantRole.openSystemSettings(requireContext())
+            true
+        }
+        findPreference<Preference>("island_accessibility")?.setOnPreferenceClickListener {
+            openAccessibilityServiceSettings()
+            true
+        }
+        refreshAssistantSummary()
+    }
+
+    private fun refreshAssistantSummary() {
+        findPreference<Preference>("assistant_power_key")?.summary = getString(
+            if (ai.opencyvis.assistant.AssistantRole.isHeld(requireContext())) R.string.pref_assistant_summary_on
+            else R.string.pref_assistant_summary_off
+        )
+        findPreference<Preference>("island_accessibility")?.summary = getString(
+            if (ai.opencyvis.accessibility.VdAccessibilityService.instance != null) R.string.pref_island_a11y_summary_on
+            else R.string.pref_island_a11y_summary_off
+        )
+    }
+
+    /** 浮窗走辅助功能悬浮窗需要用户在系统里开启 OpenCyvis 的无障碍服务，这里直接带到该服务的详情页。 */
+    private fun openAccessibilityServiceSettings() {
+        val component = android.content.ComponentName(
+            requireContext(), ai.opencyvis.accessibility.VdAccessibilityService::class.java
+        ).flattenToString()
+        val intents = listOf(
+            // 系统设置里单个无障碍服务详情页的 action（未公开常量）
+            android.content.Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+                .putExtra(android.content.Intent.EXTRA_COMPONENT_NAME, component),
+            android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS),
+        )
+        for (intent in intents) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: android.content.ActivityNotFoundException) {
+            }
+        }
     }
 
     override fun onDestroy() {

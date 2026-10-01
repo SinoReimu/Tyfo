@@ -159,7 +159,7 @@ class TestShellService : Binder() {
         }
         runOnMain(pw) { service ->
             Log.i(TAG, "start: $instruction")
-            service.startAgent(instruction)
+            Log.i(TAG, "start result: ${service.startAgent(instruction)}")
         }
     }
 

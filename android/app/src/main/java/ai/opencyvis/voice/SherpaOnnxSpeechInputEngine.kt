@@ -116,10 +116,14 @@ class SherpaOnnxSpeechInputEngine(
                 }
 
                 val samples = FloatArray(read)
+                var energy = 0.0
                 for (i in 0 until read) {
                     samples[i] = shortBuffer[i] / PCM_16BIT_SCALE
+                    energy += samples[i] * samples[i]
                 }
                 stream.acceptWaveform(samples, SAMPLE_RATE)
+                val level = audioLevel(energy / read)
+                post { listener.onAudioLevel(level) }
 
                 while (recognizer.isReady(stream)) {
                     recognizer.decode(stream)
@@ -227,6 +231,13 @@ class SherpaOnnxSpeechInputEngine(
             throw IOException("Audio recording initialization failed")
         }
         return recorder
+    }
+
+    /** 均方能量换成 0..1 的响度：-55 dBFS 以下算安静，-15 dBFS 以上算满格。 */
+    private fun audioLevel(meanSquare: Double): Float {
+        if (meanSquare <= 1e-10) return 0f
+        val db = 10.0 * kotlin.math.log10(meanSquare)
+        return ((db + 55.0) / 40.0).coerceIn(0.0, 1.0).toFloat()
     }
 
     private fun post(block: () -> Unit) {

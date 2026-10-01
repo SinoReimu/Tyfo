@@ -65,6 +65,21 @@
 
     </PreferenceCategory>
 
+    <!-- Voice assistant -->
+    <PreferenceCategory app:title="@string/pref_category_assistant">
+
+        <Preference
+            android:key="assistant_power_key"
+            android:title="@string/pref_assistant_title"
+            android:summary="@string/pref_assistant_summary_off" />
+
+        <Preference
+            android:key="island_accessibility"
+            android:title="@string/pref_island_a11y_title"
+            android:summary="@string/pref_island_a11y_summary_off" />
+
+    </PreferenceCategory>
+
     <!-- Remote Control -->
     <PreferenceCategory app:title="@string/pref_category_remote_control">
 

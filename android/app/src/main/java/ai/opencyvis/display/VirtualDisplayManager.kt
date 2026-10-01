@@ -55,7 +55,6 @@ class VirtualDisplayManager(
         private const val VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR = 1 shl 4            // 16
         private const val VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 shl 6         // 64
         private const val VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT = 1 shl 7   // 128
-        private const val VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS = 1 shl 9  // 512
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 shl 10              // 1024
         private const val VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP = 1 shl 11   // 2048
         private const val VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED = 1 shl 12      // 4096
@@ -310,7 +309,12 @@ class VirtualDisplayManager(
                 }
             }, readerHandler)
 
-            // VD config flags — adapt based on backend capabilities
+            // VD config flags — adapt based on backend capabilities.
+            // No SHOULD_SHOW_SYSTEM_DECORATIONS: on Android 17 it puts a status bar and a
+            // connected-display Taskbar (3-button nav piled onto dock icons) inside the VD.
+            // The remote VD gets home via VirtualDisplayConfig.setHomeSupported instead (see
+            // PrivilegedService). A VD without home support can't host HOME, and HOME launched
+            // at it lands on the phone's own screen, so never launch HOME onto the VD.
             var flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
                     VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
                     VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT
@@ -318,7 +322,6 @@ class VirtualDisplayManager(
             if (backend is ai.opencyvis.backend.SystemBackend) {
                 flags = flags or DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE or
                     VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or
-                    VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS or
                     VIRTUAL_DISPLAY_FLAG_TRUSTED or
                     VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED or
                     VIRTUAL_DISPLAY_FLAG_TOUCH_FEEDBACK_DISABLED or
@@ -336,7 +339,6 @@ class VirtualDisplayManager(
                 // DMS drops ALWAYS_UNLOCKED.
                 flags = flags or
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                    VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS or
                     VIRTUAL_DISPLAY_FLAG_TRUSTED or
                     VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP or
                     VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED or
@@ -358,11 +360,10 @@ class VirtualDisplayManager(
                     flags and VIRTUAL_DISPLAY_FLAG_TRUSTED.inv(),
                     // Without both TRUSTED + ALWAYS_UNLOCKED
                     flags and (VIRTUAL_DISPLAY_FLAG_TRUSTED or VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED).inv(),
-                    // Minimal: PUBLIC + SUPPORTS_TOUCH + ROTATES_WITH_CONTENT + SYSTEM_DECORATIONS
+                    // Minimal: PUBLIC + SUPPORTS_TOUCH + ROTATES_WITH_CONTENT
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
                         VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
-                        VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT or
-                        VIRTUAL_DISPLAY_FLAG_SHOULD_SHOW_SYSTEM_DECORATIONS
+                        VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT
                 )
                 var remoteDisplayId = -1
                 for ((idx, flagSet) in flagSetsToTry.withIndex()) {

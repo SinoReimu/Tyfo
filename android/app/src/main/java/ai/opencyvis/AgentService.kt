@@ -42,6 +42,7 @@ import ai.opencyvis.engine.HandoffUiState
 import ai.opencyvis.engine.HandoffVisualDetector
 import ai.opencyvis.engine.ScreenFingerprint
 import ai.opencyvis.engine.StepResult
+import ai.opencyvis.engine.isTaskActive
 import ai.opencyvis.llm.AnthropicClient
 import ai.opencyvis.llm.LLMClient
 import ai.opencyvis.llm.LLMClientInterface
@@ -49,17 +50,22 @@ import ai.opencyvis.llm.OllamaClient
 import ai.opencyvis.overlay.OverlayStatePolicy
 import ai.opencyvis.schedule.ScheduleManager
 import ai.opencyvis.ui.MessageType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
@@ -72,6 +78,9 @@ class AgentService : Service() {
         private const val TAG = "AgentService"
         private const val CHANNEL_ID = "opencyvis_agent"
         private const val CHANNEL_ASK = "opencyvis_ask_user"
+        // 执行中的实时进度：普通重要性（锁屏上能看到）但不响铃不振动
+        private const val CHANNEL_PROGRESS = "opencyvis_progress"
+        private const val ACTION_STOP_TASK = "ai.opencyvis.STOP_TASK"
         private const val NOTIFICATION_ID = 1001
         private const val NOTIFICATION_ASK_ID = 1002
         private const val NOTIFICATION_COMPLETED_ID = 1003
@@ -79,6 +88,8 @@ class AgentService : Service() {
         private const val HANDOFF_COUNTDOWN_SECONDS = 10
         private const val HANDOFF_SAMPLE_INTERVAL_MS = 1_000L
         private const val OCCUPIED_TOAST_DEBOUNCE_MS = 2_000L
+        // 任务结束、也没人在预览时，虚拟屏多留这么久给用户回看，之后回收
+        private const val VD_IDLE_RELEASE_MS = 3 * 60_000L
         const val EXTRA_FOCUS_ASK = "focus_ask_user"
         const val EXTRA_SHOW_HANDOFF = "show_handoff"
     }
@@ -86,6 +97,15 @@ class AgentService : Service() {
     // ── Display state management ────────────────────────────────────────
 
     enum class DisplayState { CHAT, VIEW, TAKEOVER }
+
+    /** [startAgent] 的受理结果。 */
+    enum class StartResult { STARTED, BUSY }
+
+    /** 任务生命周期里 AgentState 表达不了的事件。 */
+    sealed class TaskEvent {
+        /** 受理后没能真正跑起来（虚拟屏建不出来、特权服务没连上等）；[serial] 对应 [lastStartSerial]。 */
+        data class StartFailed(val serial: Int, val reason: String) : TaskEvent()
+    }
 
     var displayState = DisplayState.CHAT
         private set
@@ -104,6 +124,28 @@ class AgentService : Service() {
     val engineFlow: StateFlow<AgentEngine?> = _engineFlow.asStateFlow()
     private val _handoffUiState = MutableStateFlow<HandoffUiState>(HandoffUiState.Idle)
     val handoffUiState: StateFlow<HandoffUiState> = _handoffUiState.asStateFlow()
+    // replay 1：刚受理就失败时，晚一步开始监听的界面也能收到
+    private val _taskEvents = MutableSharedFlow<TaskEvent>(replay = 1, extraBufferCapacity = 4)
+    val taskEvents: SharedFlow<TaskEvent> = _taskEvents.asSharedFlow()
+
+    // ── 单任务闸门 ──
+    // 从 startAgent 受理到任务结束（完成 / 失败 / 被停止）都算占用，期间新的 startAgent 一律返回 BUSY，
+    // 除非调用方明确要替换。这几个字段只在主线程读写。
+    private var taskStarting = false
+    private var startJob: Job? = null
+    // 正在进行的闲置回收（移除任务要等应用真正关掉，在后台跑）；新任务要建虚拟屏得先等它结束
+    private var pendingRelease: Job? = null
+    private var startSerial = 0
+    private var viewerAttached = false
+    private val releaseIdleVdRunnable = Runnable { releaseIdleVirtualDisplay() }
+
+    /** 最近一次受理的任务序号。 */
+    val lastStartSerial: Int
+        get() = startSerial
+
+    /** 是否有任务占用着：正在准备虚拟屏，或引擎循环还没结束（含暂停、等回答、等接管）。 */
+    val isTaskActive: Boolean
+        get() = taskStarting || engine?.isLoopActive == true
     private var virtualDisplayManager: VirtualDisplayManager? = null
     private var taskDisplayGuard: TaskDisplayGuard? = null
     @Volatile private var occupancyController: AppOccupancyController? = null
@@ -116,9 +158,16 @@ class AgentService : Service() {
         private set
     var currentInstruction: String = ""
         private set
+    /** 当前任务里模型最近一条真实想法（不含“截图中 / 思考中”这类占位），给中途打开的界面补上下文。 */
+    @Volatile var latestThought: String = ""
+        private set
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val backendDeferred = CompletableDeferred<PrivilegeBackend>()
     private var backend: PrivilegeBackend? = null
+
+    private val _backendDetecting = MutableStateFlow(true)
+    /** 正在探测 / 重连特权后端。root 要等 su 授权再拉起服务，可能要好几秒，这期间别急着弹引导页。 */
+    val backendDetecting: StateFlow<Boolean> = _backendDetecting.asStateFlow()
 
     /** The name of the currently active backend (e.g. "system", "shizuku", "adb-direct"), or null. */
     val activeBackendName: String?
@@ -144,6 +193,9 @@ class AgentService : Service() {
     }
     private var stateObserverJob: Job? = null
     private var historyObserverJob: Job? = null
+    private var historyStateObserverJob: Job? = null
+    private var progressObserverJob: Job? = null
+    private var lastNotification: Notification? = null
     private var lastHistoryStatus: String? = null
     private var handoffObserverJob: Job? = null
     private var handoffMonitorJob: Job? = null
@@ -195,20 +247,34 @@ class AgentService : Service() {
                 }
                 is DetectionResult.NoneAvailable -> {
                     backendDeferred.complete(SystemBackend()) // unblock startAgent
-                    Log.w(TAG, "No backend available — wireless debugging not enabled?")
+                    Log.w(TAG, "No backend available — root not granted?")
                 }
             }
+            _backendDetecting.value = false
         }
         Log.i(TAG, "AgentService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification("OpenCyvis agent ready"))
+        // 任务进行中被再次拉起（比如语音助手）时沿用当前的进度通知，别把它刷回“待命”
+        startForeground(NOTIFICATION_ID, lastNotification ?: buildNotification("OpenCyvis agent ready"))
+
+        if (intent?.action == ACTION_STOP_TASK) {
+            Log.i(TAG, "Stop requested from notification")
+            if (isTaskActive) stopAgent()
+            return START_STICKY
+        }
 
         if (intent?.action == "ai.opencyvis.START_SCHEDULED") {
             val instruction = intent.getStringExtra("instruction") ?: return START_STICKY
             Log.i(TAG, "Scheduled task triggered: $instruction")
-            startAgent(instruction)
+            if (startAgent(instruction) == StartResult.BUSY) {
+                // 不打断用户正在跑的任务，这一次定时触发直接跳过
+                postCompletionNotification(
+                    getString(R.string.task_skipped_title),
+                    getString(R.string.task_skipped_busy, instruction)
+                )
+            }
             return START_STICKY
         }
 
@@ -224,6 +290,8 @@ class AgentService : Service() {
 
     override fun onDestroy() {
         App.agentService = null
+        startJob?.cancel()
+        mainHandler.removeCallbacks(releaseIdleVdRunnable)
         stopTaskDisplayGuard()
         handoffObserverJob?.cancel()
         handoffMonitorJob?.cancel()
@@ -329,9 +397,25 @@ class AgentService : Service() {
     // ── Agent lifecycle ─────────────────────────────────────────────────
 
     /**
-     * Create and start the agent with the given instruction.
+     * 受理一个新任务。同一时间只跑一个任务：已有任务没结束时返回 [StartResult.BUSY]，
+     * 除非 [replaceRunning]（先停掉旧任务，虚拟屏留给新任务复用）。须在主线程调用。
+     * 受理后如果没能跑起来，会发 [TaskEvent.StartFailed]。
      */
-    fun startAgent(instruction: String) {
+    fun startAgent(instruction: String, replaceRunning: Boolean = false): StartResult {
+        if (isTaskActive) {
+            if (!replaceRunning) {
+                Log.i(TAG, "startAgent refused, task still active: ${currentInstruction.take(40)}")
+                return StartResult.BUSY
+            }
+            Log.i(TAG, "startAgent replacing active task: ${currentInstruction.take(40)}")
+            endActiveTask()
+        }
+        taskStarting = true
+        latestThought = ""
+        val serial = ++startSerial
+        cancelIdleVdRelease()
+        currentInstruction = instruction
+
         // If in VIEW/TAKEOVER, return to CHAT first
         if (displayState != DisplayState.CHAT) {
             returnToChat()
@@ -339,8 +423,6 @@ class AgentService : Service() {
 
         lastHistoryStatus = null
         cancelCompletionNotification()
-        // Create or re-create engine with current config
-        engine?.destroy()
         stateObserverJob?.cancel()
         handoffObserverJob?.cancel()
         handoffMonitorJob?.cancel()
@@ -373,37 +455,33 @@ class AgentService : Service() {
             )
         }
 
-        // Await backend detection, then create VDM + engine in coroutine
-        scope.launch {
+        // 在主线程上串行地准备虚拟屏和引擎：stopAgent / 替换任务也在主线程，取消 startJob 就能干净地作废这次启动
+        startJob = scope.launch(Dispatchers.Main) {
             val b = backend ?: backendDeferred.await()
+            val vdm = obtainVirtualDisplay(b)
+            if (vdm == null) {
+                llmClient.shutdown()
+                failStart(
+                    serial,
+                    if (backend == null) getString(R.string.task_start_failed_backend)
+                    else getString(R.string.task_start_failed_display)
+                )
+                return@launch
+            }
+            val displayId = vdm.displayId
+            val displaySize = Point(vdm.width, vdm.height)
 
-            // Always use VirtualDisplay — reuse existing or create new
-            var vdm = virtualDisplayManager
-            var displayId: Int
-            var displaySize: Point?
-
-            if (vdm != null && vdm.isCreated) {
-                displayId = vdm.displayId
-                displaySize = Point(vdm.width, vdm.height)
-                Log.i(TAG, "Reusing existing virtual display $displayId")
-            } else {
-                vdm?.destroy()
-                vdm = VirtualDisplayManager(this@AgentService, b)
-                // Use physical screen resolution so VD matches the real display
-                val dm = resources.displayMetrics
-                val id = vdm.create(width = dm.widthPixels, height = dm.heightPixels, dpi = dm.densityDpi)
-                if (id != -1) {
-                    displayId = id
-                    displaySize = Point(vdm.width, vdm.height)
-                    virtualDisplayManager = vdm
-                    Log.i(TAG, "Virtual display created: $id (${vdm.width}x${vdm.height})")
-                } else {
-                    Log.e(TAG, "Failed to create virtual display")
-                    vdm.destroy()
-                    virtualDisplayManager = null
-                    updateNotification("Error: failed to create virtual display")
-                    return@launch
+            // 会话记录先落库再启动引擎，这样第一步的结果就有地方写
+            val convId = withContext(NonCancellable) {
+                historyRepo.startConversation(instruction).also {
+                    historyRepo.addMessage(it, MessageType.USER_INPUT, instruction)
                 }
+            }
+            if (!isActive) {
+                // 准备期间被停止或被新任务替换
+                llmClient.shutdown()
+                scope.launch { historyRepo.updateStatus(convId, "stopped") }
+                return@launch
             }
 
             acquireAgentWakeLock()
@@ -469,25 +547,178 @@ class AgentService : Service() {
                     }
                 }
             )
+            engine?.destroy()
             engine = newEngine
-            currentInstruction = instruction
+            currentConversationId = convId
             _engineFlow.value = newEngine
             observeConnectorState(b)
             newEngine.start(instruction)
+            taskStarting = false
+            startJob = null
 
             updateNotification("Running: ${instruction.take(30)}...")
             Log.i(TAG, "Agent started with instruction: $instruction")
-
-            // Persist conversation to history DB
-            val convId = historyRepo.startConversation(instruction)
-            currentConversationId = convId
-            historyRepo.addMessage(convId, MessageType.USER_INPUT, instruction)
 
             observeHistoryWrites()
             observeStateForVdLifecycle()
             observeAskUserNotifications()
             observeHandoffRequests()
+            observeProgressNotification()
             startTaskDisplayGuard(vdm)
+        }
+        return StartResult.STARTED
+    }
+
+    /** 复用还活着的虚拟屏，否则按预览区域的尺寸新建一块（见 [previewSizedDisplay]）。建不出来返回 null。 */
+    private suspend fun obtainVirtualDisplay(b: PrivilegeBackend): VirtualDisplayManager? {
+        // 特权服务只管一块虚拟屏：上一块还在回收时先等它释放完，免得回收把新建的这块也放掉
+        pendingRelease?.join()
+        pendingRelease = null
+        virtualDisplayManager?.let {
+            if (it.isCreated) {
+                Log.i(TAG, "Reusing existing virtual display ${it.displayId}")
+                return it
+            }
+        }
+        virtualDisplayManager?.destroy()
+        virtualDisplayManager = null
+
+        val vdm = VirtualDisplayManager(this, b)
+        val (vdWidth, vdHeight) = previewSizedDisplay()
+        val dpi = resources.displayMetrics.densityDpi
+        val id = try {
+            withContext(Dispatchers.IO) {
+                vdm.create(width = vdWidth, height = vdHeight, dpi = dpi)
+            }
+        } catch (e: CancellationException) {
+            // 建到一半被取消：这块屏没人要了，别漏掉
+            vdm.destroy()
+            throw e
+        }
+        if (id == -1) {
+            Log.e(TAG, "Failed to create virtual display")
+            vdm.destroy()
+            return null
+        }
+        virtualDisplayManager = vdm
+        Log.i(TAG, "Virtual display created: $id (${vdm.width}x${vdm.height})")
+        return vdm
+    }
+
+    private fun failStart(serial: Int, reason: String) {
+        Log.w(TAG, "Task failed to start: $reason")
+        taskStarting = false
+        startJob = null
+        currentInstruction = ""
+        updateNotification(reason)
+        _taskEvents.tryEmit(TaskEvent.StartFailed(serial, reason))
+        Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
+        scheduleIdleVdRelease()
+    }
+
+    /**
+     * 结束当前任务：停引擎、撤掉各类观察者和占用闸门，没跑完的会话标成 stopped。
+     * 不碰虚拟屏，调用方自己决定是复用还是回收。
+     */
+    private fun endActiveTask() {
+        val wasActive = isTaskActive
+        startJob?.cancel()
+        startJob = null
+        taskStarting = false
+        stopTaskDisplayGuard()
+        handoffMonitorJob?.cancel()
+        handoffMonitorJob = null
+        handoffObserverJob?.cancel()
+        activeHandoffStep = null
+        activeHandoffReason = ""
+        _handoffUiState.value = HandoffUiState.Idle
+        releaseAgentWakeLock()
+
+        // Resume agent if paused (for clean stop)
+        if (displayState == DisplayState.TAKEOVER) {
+            engine?.resume()
+        }
+        // 先撤掉完成监听，别把 stop 带来的 Idle 当成“任务完成”去发通知
+        stateObserverJob?.cancel()
+        engine?.stop()
+        historyObserverJob?.cancel()
+        historyStateObserverJob?.cancel()
+        progressObserverJob?.cancel()
+        askObserverJob?.cancel()
+        cancelAskNotification()
+
+        val convId = currentConversationId
+        if (wasActive && convId != null) {
+            scope.launch { historyRepo.updateStatus(convId, "stopped") }
+        }
+        currentConversationId = null
+        currentInstruction = ""
+    }
+
+    /**
+     * 虚拟屏尺寸 = 手机宽 ×（屏高 − 状态栏 − 底部导航条），正好是预览页能用的区域。
+     * 预览页保留手机自己的系统栏，虚拟屏里没有系统栏；和整屏同比例的话塞进去只能缩小、两边留黑，
+     * 尺寸一致就能铺满，流光直接盖在画面边缘上。横屏或拿不到 insets 时退回整屏尺寸。
+     */
+    private fun previewSizedDisplay(): Pair<Int, Int> {
+        val dm = resources.displayMetrics
+        val fullScreen = dm.widthPixels to dm.heightPixels
+        return try {
+            val display = getSystemService(android.hardware.display.DisplayManager::class.java)
+                .getDisplay(android.view.Display.DEFAULT_DISPLAY) ?: return fullScreen
+            val metrics = createDisplayContext(display)
+                .createWindowContext(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+                .getSystemService(android.view.WindowManager::class.java)
+                .maximumWindowMetrics
+            val bounds = metrics.bounds
+            if (bounds.width() >= bounds.height()) return fullScreen
+            // 和 ViewActivity.fitPreview 用同一组 insets
+            val bars = metrics.windowInsets.getInsetsIgnoringVisibility(
+                android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout()
+            )
+            val height = bounds.height() - bars.top - bars.bottom
+            if (height > bounds.width()) bounds.width() to height else fullScreen
+        } catch (e: Exception) {
+            Log.w(TAG, "previewSizedDisplay: ${e.message}")
+            fullScreen
+        }
+    }
+
+    /** ViewActivity 的预览挂上 / 摘下虚拟屏时调用；没人看且任务已结束，才开始倒计时回收虚拟屏。 */
+    fun setViewerAttached(attached: Boolean) {
+        viewerAttached = attached
+        // 虚拟屏自成一个电源组，没人唤醒它约 10 秒就休眠、不再出画面；任务结束后再打开预览会是黑屏
+        if (agentWakeLock?.isHeld != true) backend?.setVirtualDisplayAwake(attached)
+        if (attached) cancelIdleVdRelease() else scheduleIdleVdRelease()
+    }
+
+    private fun scheduleIdleVdRelease() {
+        mainHandler.removeCallbacks(releaseIdleVdRunnable)
+        // 这里按状态判断：任务刚结束时引擎协程可能还差几行才退出，到点回收时会再按 isTaskActive 确认一次
+        val busy = taskStarting || engine?.state?.value.isTaskActive
+        if (busy || viewerAttached || virtualDisplayManager == null) return
+        mainHandler.postDelayed(releaseIdleVdRunnable, VD_IDLE_RELEASE_MS)
+    }
+
+    private fun cancelIdleVdRelease() {
+        mainHandler.removeCallbacks(releaseIdleVdRunnable)
+    }
+
+    /**
+     * 任务结束后的闲置回收。直接释放的话，系统会把虚拟屏上的任务挪到主屏最顶上（Android 16 实测），
+     * Agent 用过的应用会突然跳到用户眼前；所以先把这些任务移除（等同于在最近任务里划掉），再释放虚拟屏。
+     * 用户主动“停止”时不走这里，那时仍把应用挪回主屏交给用户。
+     */
+    private fun releaseIdleVirtualDisplay() {
+        if (isTaskActive || viewerAttached) return
+        val vdm = virtualDisplayManager ?: return
+        virtualDisplayManager = null
+        val b = backend
+        // 移除任务会阻塞到应用真正关掉，放到后台线程等；等完再释放虚拟屏，全程主屏上什么都不会闪
+        pendingRelease = scope.launch(Dispatchers.Main) {
+            val removed = if (vdm.isCreated) withContext(Dispatchers.IO) { b?.removeTasksOnDisplay(vdm.displayId) } else null
+            vdm.destroy()
+            Log.i(TAG, "Released idle virtual display, removed tasks=${removed?.joinToString()}")
         }
     }
 
@@ -866,7 +1097,8 @@ class AgentService : Service() {
         }
 
         // Observe ask_user state
-        scope.launch {
+        historyStateObserverJob?.cancel()
+        historyStateObserverJob = scope.launch {
             eng.state.collect { state ->
                 val convId = currentConversationId ?: return@collect
                 if (state is AgentState.WaitingForUser) {
@@ -906,6 +1138,7 @@ class AgentService : Service() {
                     // The VD keeps its last app, but the agent is done with it: release it.
                     stopTaskDisplayGuard()
                     releaseAgentWakeLock()
+                    mainHandler.post { scheduleIdleVdRelease() }
 
                     // Update foreground notification + post completion notification if in background
                     val isBackground = !androidx.lifecycle.ProcessLifecycleOwner.get()
@@ -947,7 +1180,12 @@ class AgentService : Service() {
     }
 
     suspend fun retryBackendDetection(): Boolean {
-        val result = BackendDetector.detect(this@AgentService)
+        _backendDetecting.value = true
+        val result = try {
+            BackendDetector.detect(this@AgentService)
+        } finally {
+            _backendDetecting.value = false
+        }
         if (result is DetectionResult.Ready) {
             backend = result.backend
             ScreenCapture.backend = result.backend
@@ -963,30 +1201,8 @@ class AgentService : Service() {
     }
 
     fun stopAgent() {
-        stopTaskDisplayGuard()
-        handoffMonitorJob?.cancel()
-        handoffMonitorJob = null
-        handoffObserverJob?.cancel()
-        activeHandoffStep = null
-        activeHandoffReason = ""
-        _handoffUiState.value = HandoffUiState.Idle
-        releaseAgentWakeLock()
-
-        // Resume agent if paused (for clean stop)
-        if (displayState == DisplayState.TAKEOVER) {
-            engine?.resume()
-        }
-
-        engine?.stop()
-        historyObserverJob?.cancel()
-        askObserverJob?.cancel()
-        cancelAskNotification()
-
-        currentConversationId?.let { convId ->
-            scope.launch { historyRepo.updateStatus(convId, "stopped") }
-            currentConversationId = null
-        }
-        currentInstruction = ""
+        endActiveTask()
+        cancelIdleVdRelease()
 
         // Capture task ID before destroying VD
         val vdm = virtualDisplayManager
@@ -1038,7 +1254,8 @@ class AgentService : Service() {
     }
 
     private fun releaseAgentWakeLock() {
-        backend?.setVirtualDisplayAwake(false)
+        // 预览还开着就让虚拟屏继续亮着
+        backend?.setVirtualDisplayAwake(viewerAttached)
         val wakeLock = agentWakeLock ?: return
         try {
             if (wakeLock.isHeld) wakeLock.release()
@@ -1080,7 +1297,7 @@ class AgentService : Service() {
         val vdm = virtualDisplayManager
         if (vdm == null || !vdm.isCreated) {
             mainHandler.post {
-                Toast.makeText(this, "No virtual display", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, R.string.vd_released, Toast.LENGTH_SHORT).show()
             }
             return false
         }
@@ -1297,52 +1514,6 @@ class AgentService : Service() {
         return OverlayStatePolicy.isActive(state, displayState)
     }
 
-    /**
-     * Launch the secondary home/launcher on the given display so it's not blank.
-     * Uses SECONDARY_HOME category — Android's designated launcher for non-default displays.
-     */
-    private fun launchHomeOnDisplay(displayId: Int) {
-        try {
-            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_SECONDARY_HOME)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            val b = backend
-            if (b is RemoteBackend) {
-                val intentUri = homeIntent.toUri(Intent.URI_INTENT_SCHEME)
-                b.startActivityOnDisplay(intentUri, displayId)
-                Log.i(TAG, "Launched secondary home on display $displayId via backend")
-            } else {
-                val options = android.app.ActivityOptions.makeBasic()
-                    .setLaunchDisplayId(displayId)
-                startActivity(homeIntent, options.toBundle())
-                Log.i(TAG, "Launched secondary home on display $displayId")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to launch home on display $displayId: ${e.message}")
-            // Fallback: try regular home
-            try {
-                val fallbackIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-                }
-                val b = backend
-                if (b is RemoteBackend) {
-                    val intentUri = fallbackIntent.toUri(Intent.URI_INTENT_SCHEME)
-                    b.startActivityOnDisplay(intentUri, displayId)
-                    Log.i(TAG, "Launched home (fallback) on display $displayId via backend")
-                } else {
-                    val opts = android.app.ActivityOptions.makeBasic()
-                        .setLaunchDisplayId(displayId)
-                    startActivity(fallbackIntent, opts.toBundle())
-                    Log.i(TAG, "Launched home (fallback) on display $displayId")
-                }
-            } catch (e2: Exception) {
-                Log.w(TAG, "Failed to launch home fallback on display $displayId: ${e2.message}")
-            }
-        }
-    }
-
     // ── Notification ────────────────────────────────────────────────────
 
     private fun createNotificationChannel() {
@@ -1353,6 +1524,19 @@ class AgentService : Service() {
                 "OpenCyvis Agent",
                 NotificationManager.IMPORTANCE_LOW
             ).apply { description = "AI phone control agent service" }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PROGRESS,
+                getString(R.string.notif_channel_progress),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getString(R.string.notif_channel_progress_desc)
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+            }
         )
         nm.createNotificationChannel(
             NotificationChannel(
@@ -1384,6 +1568,74 @@ class AgentService : Service() {
 
     private fun updateNotification(text: String) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(text))
+        val notification = buildNotification(text)
+        lastNotification = notification
+        nm.notify(NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * 执行中把前台通知换成实时进度（第 N 步 · 模型的想法），锁屏上也能跟进度：
+     * 悬浮窗属于普通应用窗口，锁屏时会被系统隐藏，通知是锁屏上唯一稳定可见的地方。
+     * 锁屏隐藏敏感内容时只显示脱敏的公开版本（第 N 步），不泄露任务内容。
+     */
+    private fun observeProgressNotification() {
+        progressObserverJob?.cancel()
+        val eng = engine ?: return
+        progressObserverJob = scope.launch {
+            var lastKey: String? = null
+            var thought = ""
+            eng.state.collect { state ->
+                if (state !is AgentState.Running) return@collect
+                val t = state.thought.trim()
+                // 引擎内部的占位文案（截图中 / 思考中 / 执行中）不展示
+                if (t.isNotEmpty() && !t.startsWith("Capturing") && !t.startsWith("Thinking") && !t.startsWith("Executing")) {
+                    thought = t.replace('\n', ' ')
+                    latestThought = thought
+                }
+                val key = "${state.step}|$thought"
+                if (key == lastKey) return@collect
+                lastKey = key
+                postProgressNotification(state.step, thought)
+            }
+        }
+    }
+
+    private fun postProgressNotification(step: Int, thought: String) {
+        val openIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, ai.opencyvis.ui.ControlPanelActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val stopIntent = PendingIntent.getService(
+            this, 3,
+            Intent(this, AgentService::class.java).setAction(ACTION_STOP_TASK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val stepText = getString(R.string.notif_progress_step, step)
+        val body = if (thought.isBlank()) stepText else "$stepText · $thought"
+        val publicVersion = Notification.Builder(this, CHANNEL_PROGRESS)
+            .setContentTitle(getString(R.string.notif_progress_public_title))
+            .setContentText(stepText)
+            .setSmallIcon(R.drawable.ic_notification)
+            .build()
+        val builder = Notification.Builder(this, CHANNEL_PROGRESS)
+            .setContentTitle(currentInstruction.ifBlank { getString(R.string.app_name) })
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(openIntent)
+            .addAction(Notification.Action.Builder(null, getString(R.string.overlay_stop), stopIntent).build())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_PROGRESS)
+            // 不放进度条：折叠状态下系统会用进度条顶掉正文，锁屏上就只剩标题看不到步骤了
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            builder.setShortCriticalText(getString(R.string.notif_progress_short, step))
+        }
+        val notification = builder.build()
+        lastNotification = notification
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
     }
 }

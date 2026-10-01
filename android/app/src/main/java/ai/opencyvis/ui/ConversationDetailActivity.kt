@@ -135,8 +135,15 @@ class ConversationDetailActivity : AppCompatActivity() {
                     svc.submitUserSupplement(text)
                 }
                 else -> {
+                    if (svc.startAgent(text) == AgentService.StartResult.BUSY) {
+                        android.widget.Toast.makeText(
+                            this,
+                            getString(R.string.task_busy_toast, svc.currentInstruction.take(24)),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        return@setOnClickListener
+                    }
                     chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, text))
-                    svc.startAgent(text)
                 }
             }
             editActiveInput.text.clear()

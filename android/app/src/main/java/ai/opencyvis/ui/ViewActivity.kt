@@ -43,7 +43,9 @@ import androidx.core.content.ContextCompat
 import ai.opencyvis.voice.SherpaOnnxSpeechInputEngine
 import ai.opencyvis.voice.VoiceInputController
 import ai.opencyvis.voice.VoiceInputTestBridge
+import ai.opencyvis.ui.fx.EdgeLightView
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
@@ -75,7 +77,8 @@ class ViewActivity : AppCompatActivity() {
 
     private lateinit var surfaceView: SurfaceView
     private lateinit var touchInterceptor: View
-    private lateinit var glowBorder: GlowBorderView
+    private lateinit var glowBorder: EdgeLightView
+    private var lastAgentState: AgentState? = null
     private lateinit var fab: FrameLayout
     private lateinit var fabIcon: TextView
     private lateinit var bottomPanel: LinearLayout
@@ -133,6 +136,7 @@ class ViewActivity : AppCompatActivity() {
             // Connect SurfaceView to VD if surface is already ready
             if (surfaceView.holder.surface.isValid) {
                 service.getVirtualDisplayManager()?.setSurface(surfaceView.holder.surface)
+                service.setViewerAttached(true)
             }
 
             observeAgentState(service)
@@ -208,8 +212,24 @@ class ViewActivity : AppCompatActivity() {
         registerVoiceTestReceiver()
         setupTakeoverKeyboardProxy()
 
-        // Start glow effect — agent is running in VIEW mode
-        glowBorder.startGlow()
+        // 边缘流光按任务状态切换，首个状态到达前先保持熄灭
+
+        // 虚拟屏里没有系统栏，内容从最顶上开始画；铺满全屏会和手机自己的状态栏、导航条叠在一起。
+        // 所以预览放在状态栏和导航栏之间。虚拟屏本身就按这块区域的尺寸创建（AgentService.previewSizedDisplay），
+        // 正好铺满；尺寸对不上时（比如沿用了旧虚拟屏）才等比缩放、留黑边。流光盖在画面边缘上。
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.view_root)) { root, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            fitPreview(root.width, root.height, bars.top, bars.bottom)
+            insets
+        }
+        findViewById<View>(R.id.view_root).addOnLayoutChangeListener { root, _, _, _, _, _, _, _, _ ->
+            val bars = ViewCompat.getRootWindowInsets(root)?.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            ) ?: return@addOnLayoutChangeListener
+            fitPreview(root.width, root.height, bars.top, bars.bottom)
+        }
 
         // Apply nav bar insets to bottom panel and FAB
         ViewCompat.setOnApplyWindowInsetsListener(bottomPanel) { view, insets ->
@@ -241,6 +261,7 @@ class ViewActivity : AppCompatActivity() {
             override fun surfaceCreated(holder: SurfaceHolder) {
                 Log.i(TAG, "Surface created, connecting to VD")
                 agentService?.getVirtualDisplayManager()?.setSurface(holder.surface)
+                agentService?.setViewerAttached(true)
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -250,6 +271,7 @@ class ViewActivity : AppCompatActivity() {
             override fun surfaceDestroyed(holder: SurfaceHolder) {
                 Log.i(TAG, "Surface destroyed, switching VD back to ImageReader")
                 agentService?.getVirtualDisplayManager()?.setSurface(null)
+                agentService?.setViewerAttached(false)
             }
         })
 
@@ -354,12 +376,25 @@ class ViewActivity : AppCompatActivity() {
 
     private fun observeAgentState(service: AgentService) {
         stateJob?.cancel()
-        val flow = service.stateFlow ?: return
-
+        // 跟着 engineFlow 走：预览页开着时换了新任务（新引擎），也能收到新任务的状态
         stateJob = lifecycleScope.launch {
-            flow.collect { state ->
-                onAgentStateChanged(state)
+            service.engineFlow.collectLatest { engine ->
+                engine?.state?.collect { state -> onAgentStateChanged(state) }
             }
+        }
+    }
+
+    /** 边缘流光跟任务状态走；接管时用户在操作，熄灭免得挡视线。 */
+    private fun applyGlowForState(state: AgentState?) {
+        glowBorder.mode = when {
+            isTakeoverMode -> EdgeLightView.Mode.PAUSED
+            state is AgentState.Running ->
+                if (state.thought.startsWith("Thinking") || state.thought.startsWith("Capturing")) EdgeLightView.Mode.THINKING
+                else EdgeLightView.Mode.RUNNING
+            state is AgentState.WaitingForUser || state is AgentState.WaitingForHandoff -> EdgeLightView.Mode.WAITING
+            state is AgentState.Idle -> if (state.resultMessage != null) EdgeLightView.Mode.SUCCESS else EdgeLightView.Mode.OFF
+            state is AgentState.Error -> EdgeLightView.Mode.ERROR
+            else -> EdgeLightView.Mode.OFF
         }
     }
 
@@ -396,12 +431,13 @@ class ViewActivity : AppCompatActivity() {
 
     private fun onAgentStateChanged(state: AgentState) {
         Log.d(TAG, "Agent state: $state")
+        lastAgentState = state
+        applyGlowForState(state)
 
         when (state) {
             is AgentState.Running -> {
                 wasRunning = true
                 updateFabIcon("▶", "#FFFFFF")
-                glowBorder.startGlow()
                 clearAskUserSection()
                 showSupplementSection()
                 hideResultPanel()
@@ -418,7 +454,6 @@ class ViewActivity : AppCompatActivity() {
                 showHandoffActive(state.reason)
             }
             is AgentState.Idle -> {
-                glowBorder.stopGlow()
                 updateFabIcon("✓", "#4CAF50")
                 clearAskUserSection()
                 hideSupplementSection()
@@ -429,7 +464,6 @@ class ViewActivity : AppCompatActivity() {
                 wasRunning = false
             }
             is AgentState.Error -> {
-                glowBorder.stopGlow()
                 updateFabIcon("✗", "#F44336")
                 clearAskUserSection()
                 hideSupplementSection()
@@ -754,6 +788,7 @@ class ViewActivity : AppCompatActivity() {
             voiceTestReceiverRegistered = false
         }
         agentService?.getVirtualDisplayManager()?.setSurface(null)
+        agentService?.setViewerAttached(false)
 
         if (bound) {
             unbindService(serviceConnection)
@@ -802,7 +837,6 @@ class ViewActivity : AppCompatActivity() {
         isTakeoverMode = takeover
         if (takeover) {
             touchInterceptor.visibility = View.GONE
-            glowBorder.stopGlow()
             btnTakeover.text = getString(R.string.vd_btn_return_control)
             takeoverKeyboardProxy.isEnabled = true
             collapsePanel()
@@ -810,9 +844,9 @@ class ViewActivity : AppCompatActivity() {
             hideTakeoverKeyboard()
             takeoverKeyboardProxy.isEnabled = false
             touchInterceptor.visibility = View.VISIBLE
-            glowBorder.startGlow()
             btnTakeover.text = getString(R.string.vd_btn_take_over)
         }
+        applyGlowForState(lastAgentState)
         Log.i(TAG, "Takeover mode: $takeover")
     }
 
@@ -822,12 +856,48 @@ class ViewActivity : AppCompatActivity() {
         }
     }
 
+    /** 预览区域：可用高度内按虚拟屏宽高比等比缩放，水平居中，顶在状态栏下方。 */
+    private fun fitPreview(rootW: Int, rootH: Int, topInset: Int, bottomInset: Int) {
+        if (rootW <= 0 || rootH <= 0) return
+        val (vdW, vdH) = vdSize()
+        val availH = (rootH - topInset - bottomInset).coerceAtLeast(1)
+        var w = rootW
+        var h = (w.toLong() * vdH / vdW).toInt()
+        if (h > availH) {
+            h = availH
+            w = (h.toLong() * vdW / vdH).toInt()
+        }
+        val lp = surfaceView.layoutParams as FrameLayout.LayoutParams
+        val top = topInset + (availH - h) / 2
+        if (lp.width == w && lp.height == h && lp.topMargin == top) return
+        lp.width = w
+        lp.height = h
+        lp.topMargin = top
+        lp.gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL
+        surfaceView.layoutParams = lp
+        // 缓冲区保持虚拟屏原始分辨率，由 SurfaceView 缩放显示，画面不糊
+        surfaceView.holder.setFixedSize(vdW, vdH)
+    }
+
+    private fun vdSize(): Pair<Int, Int> {
+        val vdm = agentService?.getVirtualDisplayManager()
+        if (vdm != null && vdm.width > 0 && vdm.height > 0) return vdm.width to vdm.height
+        val dm = resources.displayMetrics
+        return dm.widthPixels to dm.heightPixels
+    }
+
     private fun forwardTouchToVD(event: MotionEvent) {
         val vdm = agentService?.getVirtualDisplayManager() ?: return
         val displayId = vdm.displayId
         if (displayId == -1) return
 
         val injected = MotionEvent.obtain(event)
+        // 预览是缩放过的，触摸坐标按比例换算回虚拟屏坐标
+        if (surfaceView.width > 0 && surfaceView.height > 0) {
+            injected.transform(android.graphics.Matrix().apply {
+                setScale(vdm.width.toFloat() / surfaceView.width, vdm.height.toFloat() / surfaceView.height)
+            })
+        }
         val result = InputInjector.injectToDisplay(this, injected, displayId)
         Log.d(TAG, "Injected touch to display $displayId: result=$result action=${event.action} x=${event.x} y=${event.y}")
         injected.recycle()

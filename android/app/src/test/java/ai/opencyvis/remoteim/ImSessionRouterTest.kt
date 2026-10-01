@@ -91,12 +91,24 @@ class ImSessionRouterTest {
     @Test
     fun `normal command starts task`() = runTest {
         every { agent.bindActiveSession(any(), any()) } just Runs
-        coEvery { agent.startTask(any()) } just Runs
+        coEvery { agent.startTask(any()) } returns true
 
         router.onInbound(fakeChannel, makeMsg("打开设置"))
 
         verify { agent.bindActiveSession("telegram", "999") }
         coVerify { agent.startTask("打开设置") }
+    }
+
+    @Test
+    fun `replies busy when another task still holds the agent`() = runTest {
+        // 暂停 / 等接管 / 正在启动时 state 不是 Running，但单任务闸门会拒绝
+        every { agent.bindActiveSession(any(), any()) } just Runs
+        coEvery { agent.startTask(any()) } returns false
+        coEvery { manager.sendText(any(), any(), any()) } just Runs
+
+        router.onInbound(fakeChannel, makeMsg("打开设置"))
+
+        coVerify { manager.sendText("telegram", "999", match { it.contains("忙") }) }
     }
 
     @Test

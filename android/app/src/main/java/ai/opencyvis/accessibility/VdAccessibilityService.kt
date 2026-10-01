@@ -18,6 +18,15 @@ class VdAccessibilityService : AccessibilityService() {
         var instance: VdAccessibilityService? = null
             private set
 
+        /** 服务连上 / 断开时回调（主线程），浮窗据此切换辅助功能悬浮窗和普通悬浮窗。 */
+        val connectionListeners = java.util.concurrent.CopyOnWriteArraySet<() -> Unit>()
+
+        private fun notifyConnectionChanged() {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                connectionListeners.forEach { it() }
+            }
+        }
+
         fun captureViewTree(displayId: Int, displayWidth: Int, displayHeight: Int): String? {
             return instance?.captureViewTreeInternal(displayId, displayWidth, displayHeight)
         }
@@ -59,6 +68,7 @@ class VdAccessibilityService : AccessibilityService() {
                 AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         }
         Log.i(TAG, "AccessibilityService connected")
+        notifyConnectionChanged()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -67,8 +77,17 @@ class VdAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
-    override fun onDestroy() {
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
         instance = null
+        notifyConnectionChanged()
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        if (instance === this) {
+            instance = null
+            notifyConnectionChanged()
+        }
         super.onDestroy()
     }
 

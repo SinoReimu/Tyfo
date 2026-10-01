@@ -513,32 +513,19 @@ class PrivilegedService : IPrivilegedService.Stub() {
                     .invoke(builder, surface)
             } catch (_: NoSuchMethodException) {}
 
+            // setHomeSupported(boolean), API 35+: lets the launcher live on the VD without
+            // SHOULD_SHOW_SYSTEM_DECORATIONS (which on Android 17 also adds a status bar and
+            // Taskbar). DMS honors it for TRUSTED, non-AUTO_MIRROR displays.
+            try {
+                builderClass.getMethod("setHomeSupported", Boolean::class.javaPrimitiveType)
+                    .invoke(builder, true)
+            } catch (_: NoSuchMethodException) {}
+
             // build()
             builderClass.getMethod("build").invoke(builder)
         } catch (e: Exception) {
             Log.w(TAG, "buildVirtualDisplayConfig failed: ${e.javaClass.simpleName}: ${e.message}")
             null
-        }
-    }
-
-    /**
-     * Launch the home/launcher on the VD to ensure something renders.
-     * Called when VD has no Activity (e.g. after a failed am start) and
-     * the ImageReader produces no new frames.
-     */
-    override fun ensureVdHasContent(displayId: Int) {
-        checkCaller()
-        val cmd = arrayOf(
-            "am", "start", "--display", displayId.toString(),
-            "-a", "android.intent.action.MAIN",
-            "-c", "android.intent.category.HOME"
-        )
-        try {
-            val process = Runtime.getRuntime().exec(cmd)
-            process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-            Log.i(TAG, "ensureVdHasContent: launched home on display $displayId")
-        } catch (e: Exception) {
-            Log.w(TAG, "ensureVdHasContent failed: ${e.message}")
         }
     }
 
@@ -771,6 +758,23 @@ class PrivilegedService : IPrivilegedService.Stub() {
     override fun getTopTaskOnDisplay(displayId: Int, callerPackage: String): android.os.Bundle? {
         checkCaller()
         return DisplayOps.getTopTaskOnDisplay(displayId, callerPackage)
+    }
+
+    /**
+     * 应用进程死了（被覆盖安装、崩溃）：退出前先移除虚拟屏上的任务再释放。
+     * 否则系统回收虚拟屏时会把上面的应用挪到主屏最顶上，突然跳到用户眼前。
+     */
+    fun onOwnerDied() {
+        val displayId = vdDisplayId
+        if (displayId > 0) {
+            DisplayOps.removeTasksOnDisplay(displayId)
+        }
+        releaseVirtualDisplay()
+    }
+
+    override fun removeTasksOnDisplay(displayId: Int): IntArray {
+        checkCaller()
+        return DisplayOps.removeTasksOnDisplay(displayId)
     }
 
     override fun setActivityController(controller: android.os.IBinder?): Boolean {

@@ -299,4 +299,63 @@
     <string name="routine_longpress_rerun">Run Again</string>
     <string name="routine_manage_schedule">Set Schedule</string>
     <string name="app_occupied_by_agent">%1$s is in use by the agent until its task ends</string>
+    <!-- Single-task gate / virtual display lifecycle -->
+    <string name="task_busy_toast">A task is still running: %1$s</string>
+    <string name="task_skipped_title">Scheduled task skipped</string>
+    <string name="task_skipped_busy">Another task was running, so “%1$s” was skipped this time.</string>
+    <string name="backend_connecting_toast">Connecting the privileged service, try again in a moment</string>
+    <string name="task_start_failed_backend">Privileged service not connected, can’t start the task</string>
+    <string name="task_start_failed_display">Couldn’t create the virtual display, task not started</string>
+    <string name="vd_released">The last task’s screen has been released</string>
+
+    <!-- Task island (floating window) -->
+    <string name="island_step">Step %1$d</string>
+    <string name="island_waiting_answer">Needs your answer</string>
+    <string name="island_waiting_handoff">Needs you to take over</string>
+    <string name="island_done">Task complete</string>
+    <string name="island_failed">Task failed</string>
+    <string name="island_open">View screen</string>
+    <string name="island_answer">Answer</string>
+    <string name="island_takeover">Take over</string>
+
+    <!-- Voice assistant (long-press power) -->
+    <string name="assist_hint_idle">What should I do for you?</string>
+    <string name="assist_hint_busy">Say something to add to the current task</string>
+    <string name="assist_hint_answer">Just say your answer</string>
+    <string name="assist_hint_typing">Type a task for OpenCyvis</string>
+    <string name="assist_no_match">Didn’t catch that. Tap the mic to try again</string>
+    <string name="assist_no_mic">Microphone not allowed, you can type instead</string>
+    <string name="assist_no_model">Speech model not downloaded yet, you can type instead</string>
+    <string name="assist_submitting">Handing it to OpenCyvis…</string>
+    <string name="assist_done_started">On it. Progress is in the island at the top</string>
+    <string name="assist_done_replaced">Stopped the old task and started this one</string>
+    <string name="assist_done_supplemented">Added to the current task</string>
+    <string name="assist_done_answered">Answer sent</string>
+    <string name="assist_done_stopped">Current task stopped</string>
+    <string name="assist_choice_caption">A task is still running. What should I do with this?</string>
+    <string name="assist_choice_supplement">Add to current task</string>
+    <string name="assist_choice_replace">Stop it and do this instead</string>
+    <string name="assist_task_running">Step %1$d · running</string>
+    <string name="assist_task_starting">Starting</string>
+    <string name="assist_task_waiting_answer">Waiting for your answer</string>
+    <string name="assist_task_waiting_handoff">Waiting for you to take over</string>
+    <string name="assist_task_view">View</string>
+    <string name="assist_cd_keyboard">Type instead</string>
+    <string name="assist_cd_mic">Speak</string>
+    <string name="pref_category_assistant">Voice assistant</string>
+    <string name="pref_assistant_title">Long-press power for OpenCyvis</string>
+    <string name="pref_assistant_summary_off">Off. Tap, then pick OpenCyvis as the default digital assistant app</string>
+    <string name="pref_assistant_summary_on">On. Long-press the power button to give OpenCyvis a task</string>
+    <string name="pref_assistant_guide">Open “Digital assistant app” and choose OpenCyvis</string>
+    <string name="assist_tracking_locked">Screen is locked, progress shows here live</string>
+    <string name="assist_tracking_done">Done: %1$s</string>
+    <string name="notif_channel_progress">Task progress</string>
+    <string name="notif_channel_progress_desc">Live progress of the running task, also shown on the lock screen</string>
+    <string name="notif_progress_step">Step %1$d</string>
+    <string name="notif_progress_short">Step %1$d</string>
+    <string name="notif_progress_public_title">OpenCyvis is running a task</string>
+    <string name="pref_island_a11y_title">Show the island via accessibility</string>
+    <string name="pref_island_a11y_summary_off">Off: the island is hidden on the lock screen and system Settings pages. Tap to turn on the OpenCyvis accessibility service</string>
+    <string name="pref_island_a11y_summary_on">On: the island also shows on the lock screen and above system Settings</string>
+    <string name="island_collapse">Collapse</string>
 </resources>

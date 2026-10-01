@@ -88,7 +88,11 @@ class ImSessionRouter(
             else -> {
                 Log.i(TAG, "Starting task: ${msg.text.take(50)}")
                 agent.bindActiveSession(channel.channelId, msg.chatId)
-                agent.startTask(msg.text.trim())
+                if (!agent.startTask(msg.text.trim())) {
+                    // 暂停、等接管、正在启动等状态也算占用，不能顶掉当前任务
+                    manager.sendText(channel.channelId, msg.chatId, stringProvider.busy())
+                    return@withLock
+                }
                 if (channel.channelId == "feishu") {
                     config.feishuLastProcessedMsgTime = System.currentTimeMillis()
                 }

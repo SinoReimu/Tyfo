@@ -99,8 +99,10 @@ class ImAgentBridge(
         } ?: false
     }
 
-    suspend fun startTask(instruction: String) {
-        agentService?.startAgent(instruction)
+    /** 返回 false 表示已有任务在跑（单任务），调用方应回复“忙”。 */
+    suspend fun startTask(instruction: String): Boolean {
+        val svc = agentService ?: return false
+        return svc.startAgent(instruction) == AgentService.StartResult.STARTED
     }
 
     private fun observeEngine(svc: AgentService) {
