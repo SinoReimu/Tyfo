@@ -42,6 +42,7 @@ import ai.opencyvis.engine.AgentEngine
 import ai.opencyvis.engine.AgentState
 import ai.opencyvis.engine.isTaskActive
 import ai.opencyvis.ui.fx.AgentIconView
+import ai.opencyvis.ui.fx.AuraPalette
 import ai.opencyvis.ui.fx.MonetPalette
 import ai.opencyvis.ui.fx.PanelFrameLayout
 import ai.opencyvis.ui.fx.ProgressLineView
@@ -129,6 +130,15 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     private var pendingUtterance: String? = null
     private var suggestions: List<String> = emptyList()
     private var entryAnimator: ValueAnimator? = null
+    // 推荐 chip 要等胶囊铺开、内容开始淡入后再弹出，否则历史记录读得快，会比胶囊先冒出来
+    private var chipsReady = false
+    // 当前显示的 chip（文案 + 样式）；同一组再设一遍不重建，免得整排消失再弹一次
+    private var chipsKey: String? = null
+    private val micFill = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+    private var micFillColor = 0
+    private var micTintColor = 0
+    private var micTarget: Pair<Int, Int>? = null
+    private var micAnimator: ValueAnimator? = null
     // 模型的真实想法只在拿到回复的那一下出现，随后就被“执行中 / 截图中”覆盖，卡片上保留最近一条
     private var lastThought = ""
     private val autoCloseRunnable = Runnable { close() }
@@ -154,9 +164,10 @@ class AssistantPanel(private val context: Context, private val host: Host) {
         // 圆角取 min(高度一半, 固定值)：单行时是胶囊，内容变多成卡片时不会变成一大团
         taskCard.panel.cornerRadius = dp(28).toFloat()
         pill.panel.cornerRadius = dp(32).toFloat()
+        micButton.background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), micFill, null)
         applyPalette()
         root.setOnClickListener { close() }
-        keyboardButton.setOnClickListener { if (phase == Phase.TYPING) startListening() else enterTyping(null) }
+        keyboardButton.setOnClickListener { enterTyping(null) }
         micButton.setOnClickListener { onMicClicked() }
         input.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -629,7 +640,7 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     }
 
     private fun showSuggestionsIfIdle() {
-        if (suggestions.isEmpty() || isBusy()) return
+        if (!chipsReady || suggestions.isEmpty() || isBusy()) return
         if (phase != Phase.LISTENING && phase != Phase.NO_MATCH && phase != Phase.IDLE) return
         setChips(suggestions.map { s -> Chip(s, primary = false) { stopListening(); submit(s) } })
     }
@@ -640,6 +651,16 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     }
 
     private fun setChips(items: List<Chip>) {
+        val key = items.joinToString("\u0000") { "${it.primary}:${it.label}" }
+        if (key == chipsKey && chipsScroll.visibility == View.VISIBLE) {
+            // 同一组 chip：只换点击动作，不重播入场
+            items.forEachIndexed { i, chip -> chips.getChildAt(i)?.setOnClickListener { chip.onClick() } }
+            return
+        }
+        chipsKey = key.ifEmpty { null }
+        chipsScroll.animate().cancel()
+        chipsScroll.alpha = 1f
+        chipsScroll.translationY = 0f
         chips.removeAllViews()
         items.forEachIndexed { index, chip ->
             val tv = TextView(context).apply {
@@ -668,6 +689,7 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     }
 
     private fun hideChips() {
+        chipsKey = null
         if (chipsScroll.visibility == View.VISIBLE) fadeOut(chipsScroll) { chips.removeAllViews() }
     }
 
@@ -704,25 +726,51 @@ class AssistantPanel(private val context: Context, private val host: Host) {
         }
     }
 
-    /** 麦克风按钮：强调色实心圆；聆听时外面多一圈随音量涨缩的淡色光环；打字且有内容时变成发送。 */
+    /**
+     * 麦克风按钮：强调色实心圆；聆听时外面多一圈随音量涨缩的淡色光环；打字且有内容时变成发送。
+     * 打字时右边只留这一个按钮（没内容是麦克风，点了切回说话），不再另放一个切换按钮，免得出现两个麦克风。
+     */
     private fun renderMic() {
         val typingSend = phase == Phase.TYPING && input.text.isNotBlank()
-        val bg = GradientDrawable().apply { shape = GradientDrawable.OVAL }
-        if (listening || typingSend) {
-            bg.setColor(palette.accent)
-            micButton.imageTintList = ColorStateList.valueOf(palette.onAccent)
-        } else {
-            bg.setColor(palette.ghost)
-            micButton.imageTintList = ColorStateList.valueOf(palette.text)
-        }
+        if (listening || typingSend) setMicColors(palette.accent, palette.onAccent)
+        else setMicColors(palette.ghost, palette.text)
         micButton.setImageResource(if (typingSend) R.drawable.ic_assist_send else R.drawable.ic_assist_mic)
-        micButton.background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), bg, null)
+        micButton.contentDescription = context.getString(if (typingSend) R.string.cd_send else R.string.assist_cd_mic)
         micHalo.animate().alpha(if (listening) 1f else 0f).setDuration(220).start()
         if (!listening) {
             micHalo.scaleX = 1f
             micHalo.scaleY = 1f
         }
-        keyboardButton.setImageResource(if (phase == Phase.TYPING) R.drawable.ic_assist_mic else R.drawable.ic_assist_keyboard)
+        keyboardButton.visibility = if (phase == Phase.TYPING) View.GONE else View.VISIBLE
+    }
+
+    /** 麦克风按钮底色 / 图标色切换时渐变过去（开始聆听时不是一下子跳成强调色）。 */
+    private fun setMicColors(fill: Int, tint: Int) {
+        val target = fill to tint
+        if (target == micTarget) return
+        micTarget = target
+        micAnimator?.cancel()
+        fun apply(f: Int, t: Int) {
+            micFillColor = f
+            micTintColor = t
+            micFill.setColor(f)
+            micButton.imageTintList = ColorStateList.valueOf(t)
+        }
+        if (micFillColor == 0) {
+            apply(fill, tint)
+            return
+        }
+        val fromFill = micFillColor
+        val fromTint = micTintColor
+        micAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val k = it.animatedFraction
+                apply(AuraPalette.lerpColor(fromFill, fill, k), AuraPalette.lerpColor(fromTint, tint, k))
+            }
+            start()
+        }
     }
 
     /** 推荐 chip：比主面板低一级——更透明、不带投影、一圈细描边；主操作用强调色实心。 */
@@ -777,6 +825,8 @@ class AssistantPanel(private val context: Context, private val host: Host) {
         input.text.clear()
         setHint(context.getString(R.string.assist_hint_idle))
         setCaption(null)
+        chipsReady = false
+        chipsKey = null
         chips.removeAllViews()
         chipsScroll.visibility = View.GONE
         taskCard.visibility = View.GONE
@@ -830,16 +880,24 @@ class AssistantPanel(private val context: Context, private val host: Host) {
                     val t = it.animatedFraction
                     shape(spring.getInterpolation(t))
                     pillContent.alpha = ((t - 0.28f) / 0.45f).coerceIn(0f, 1f)
+                    if (!chipsReady && t >= 0.45f) onEntrySettled()
                 }
                 addListener(object : AnimatorListenerAdapter() {
                     override fun onAnimationEnd(animation: Animator) {
                         pillContent.alpha = 1f
                         pill.setShape(null)
+                        if (!chipsReady) onEntrySettled()
                     }
                 })
                 start()
             }
         }
+    }
+
+    /** 胶囊铺开得差不多了：放出推荐 chip。 */
+    private fun onEntrySettled() {
+        chipsReady = true
+        showSuggestionsIfIdle()
     }
 
     /**

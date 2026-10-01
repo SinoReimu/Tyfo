@@ -9,13 +9,18 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.text.Editable
+import android.text.TextUtils
 import android.text.TextWatcher
+import android.text.method.ScrollingMovementMethod
 import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -25,25 +30,29 @@ import android.view.View
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
-import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import ai.opencyvis.AgentService
 import ai.opencyvis.R
 import ai.opencyvis.engine.AgentState
 import ai.opencyvis.engine.HandoffUiState
 import ai.opencyvis.input.InputInjector
-import androidx.core.content.ContextCompat
 import ai.opencyvis.voice.SherpaOnnxSpeechInputEngine
 import ai.opencyvis.voice.VoiceInputController
 import ai.opencyvis.voice.VoiceInputTestBridge
+import ai.opencyvis.ui.fx.AgentIconView
 import ai.opencyvis.ui.fx.EdgeLightView
+import ai.opencyvis.ui.fx.MonetPalette
+import ai.opencyvis.ui.fx.MorphPanelLayout
+import ai.opencyvis.ui.fx.ProgressLineView
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -54,15 +63,14 @@ import kotlinx.coroutines.launch
  * - VIEW mode: SurfaceView shows VD content, touches blocked, agent keeps running
  * - TAKEOVER mode: Touches and key events forwarded to VD, agent paused.
  *
- * Bottom controls: collapsible FAB that expands into a control panel.
- * Auto-expands with input field when agent asks user a question.
- * Shows banner when task completes or fails.
+ * 底部控制和顶部任务浮窗是同一套莫奈扁平样式：收起是一枚状态胶囊（状态图标 + 当前进展），
+ * 点开形变成控制卡片（任务、状态、进展 / 问题 / 结果，补充或回答的输入框，返回 / 接管 / 停止）。
+ * 等用户回答、需要接管、任务结束时自动展开；因为等用户而自动展开的，恢复执行后自动收起。
  */
 class ViewActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "ViewActivity"
-        private const val BANNER_DISMISS_MS = 4000L
         private const val REQUEST_RECORD_AUDIO = 2002
         const val EXTRA_SHOW_CONTROLS = "ai.opencyvis.ui.ViewActivity.SHOW_CONTROLS"
     }
@@ -70,48 +78,54 @@ class ViewActivity : AppCompatActivity() {
     private var agentService: AgentService? = null
     private var bound = false
     private var isTakeoverMode = false
-    private var isPanelExpanded = false
     private var stateJob: Job? = null
     private var handoffUiJob: Job? = null
-    private var wasRunning = false
 
+    private lateinit var palette: MonetPalette
     private lateinit var surfaceView: SurfaceView
     private lateinit var touchInterceptor: View
     private lateinit var glowBorder: EdgeLightView
-    private var lastAgentState: AgentState? = null
-    private lateinit var fab: FrameLayout
-    private lateinit var fabIcon: TextView
-    private lateinit var bottomPanel: LinearLayout
-    private lateinit var askUserSection: LinearLayout
-    private lateinit var supplementSection: LinearLayout
-    private lateinit var panelDivider: View
-    private lateinit var questionText: TextView
-    private lateinit var answerInput: EditText
-    private lateinit var supplementInput: EditText
-    private lateinit var takeoverKeyboardProxy: EditText
-    private lateinit var btnSendAnswer: Button
-    private lateinit var btnSendSupplement: Button
-    private lateinit var btnVoiceAnswer: Button
-    private lateinit var btnTakeover: Button
-    private lateinit var statusBanner: TextView
-    private lateinit var handoffPanel: LinearLayout
-    private lateinit var handoffReason: TextView
+    private lateinit var controlPanel: MorphPanelLayout
+    private lateinit var fab: View
+    private lateinit var fabIcon: AgentIconView
+    private lateinit var fabText: TextView
+    private lateinit var panelIcon: AgentIconView
+    private lateinit var panelTitle: TextView
+    private lateinit var panelMeta: TextView
+    private lateinit var panelDetail: TextView
+    private lateinit var panelProgress: ProgressLineView
+    private lateinit var btnCollapse: ImageView
+    private lateinit var handoffPanel: View
+    private lateinit var handoffNote: TextView
     private lateinit var handoffCountdownText: TextView
-    private lateinit var handoffPendingActions: LinearLayout
-    private lateinit var btnHandoffNow: Button
-    private lateinit var btnHandoffCancel: Button
-    private lateinit var controlButtons: LinearLayout
-    private lateinit var resultPanel: LinearLayout
-    private lateinit var resultIcon: TextView
-    private lateinit var resultMessage: TextView
-    private var isResultPanelVisible = false
+    private lateinit var handoffPendingActions: View
+    private lateinit var btnHandoffNow: TextView
+    private lateinit var btnHandoffCancel: TextView
+    private lateinit var inputRow: View
+    private lateinit var answerInput: EditText
+    private lateinit var btnSendAnswer: ImageView
+    private lateinit var btnBack: ImageView
+    private lateinit var btnTakeover: TextView
+    private lateinit var btnStop: TextView
+    private lateinit var takeoverKeyboardProxy: EditText
+
+    private var lastAgentState: AgentState? = null
+    private var handoffUi: HandoffUiState = HandoffUiState.Idle
+    // 模型的真实想法只在拿到回复的那一下出现，随后就被“截图中 / 思考中”覆盖，保留最近一条
+    private var lastThought = ""
+    // 因为等用户（回答 / 接管）或任务结束而自动展开的，恢复执行后自动收起；用户自己点开的不收
+    private var autoExpanded = false
+    // 输入框当前是回答问题（true）还是补充任务信息（false）
+    private var answering = false
+    private var navBottom = 0
+    private var imeBottom = 0
+
     private lateinit var voiceAnswerController: VoiceInputController
     private var voiceTestReceiverRegistered = false
     private var proxyTextMutation = false
     private var takeoverTouchDownX = 0f
     private var takeoverTouchDownY = 0f
     private var pendingShowControls = false
-    private var currentAskQuestion: String? = null
 
     private val voiceTestReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -124,7 +138,13 @@ class ViewActivity : AppCompatActivity() {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val bannerDismissRunnable = Runnable { hideBanner() }
+
+    // 卡片展开时返回手势先收起卡片
+    private val collapseOnBack = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() {
+            collapsePanel()
+        }
+    }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -143,6 +163,7 @@ class ViewActivity : AppCompatActivity() {
             observeAgentState(service)
             observeHandoffUiState(service)
             syncTakeoverModeFromService()
+            render()
             if (pendingShowControls) {
                 pendingShowControls = false
                 expandPanel()
@@ -165,43 +186,44 @@ class ViewActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         setContentView(R.layout.activity_view)
+        palette = MonetPalette(this)
 
         surfaceView = findViewById(R.id.surface_view)
         touchInterceptor = findViewById(R.id.touch_interceptor)
         glowBorder = findViewById(R.id.glow_border)
+        controlPanel = findViewById(R.id.control_panel)
         fab = findViewById(R.id.fab)
         fabIcon = findViewById(R.id.fab_icon)
-        bottomPanel = findViewById(R.id.bottom_panel)
-        askUserSection = findViewById(R.id.ask_user_section)
-        supplementSection = findViewById(R.id.supplement_section)
-        panelDivider = findViewById(R.id.panel_divider)
-        questionText = findViewById(R.id.question_text)
-        answerInput = findViewById(R.id.answer_input)
-        supplementInput = findViewById(R.id.supplement_input)
-        takeoverKeyboardProxy = findViewById(R.id.takeover_keyboard_proxy)
-        btnSendAnswer = findViewById(R.id.btn_send_answer)
-        btnSendSupplement = findViewById(R.id.btn_send_supplement)
-        btnVoiceAnswer = findViewById(R.id.btn_voice_answer)
-        btnTakeover = findViewById(R.id.btn_takeover)
-        statusBanner = findViewById(R.id.status_banner)
+        fabText = findViewById(R.id.fab_text)
+        panelIcon = findViewById(R.id.panel_icon)
+        panelTitle = findViewById(R.id.panel_title)
+        panelMeta = findViewById(R.id.panel_meta)
+        panelDetail = findViewById(R.id.panel_detail)
+        panelProgress = findViewById(R.id.panel_progress)
+        btnCollapse = findViewById(R.id.btn_collapse)
         handoffPanel = findViewById(R.id.handoff_panel)
-        handoffReason = findViewById(R.id.handoff_reason)
+        handoffNote = findViewById(R.id.handoff_note)
         handoffCountdownText = findViewById(R.id.handoff_countdown_text)
         handoffPendingActions = findViewById(R.id.handoff_pending_actions)
         btnHandoffNow = findViewById(R.id.btn_handoff_now)
         btnHandoffCancel = findViewById(R.id.btn_handoff_cancel)
-        controlButtons = findViewById(R.id.control_buttons)
-        resultPanel = findViewById(R.id.result_panel)
-        resultIcon = findViewById(R.id.result_icon)
-        resultMessage = findViewById(R.id.result_message)
+        inputRow = findViewById(R.id.input_row)
+        answerInput = findViewById(R.id.answer_input)
+        btnSendAnswer = findViewById(R.id.btn_send_answer)
+        btnBack = findViewById(R.id.btn_back)
+        btnTakeover = findViewById(R.id.btn_takeover)
+        btnStop = findViewById(R.id.btn_stop)
+        takeoverKeyboardProxy = findViewById(R.id.takeover_keyboard_proxy)
+
+        fabIcon.showRing = true
+        applyPalette()
 
         voiceAnswerController = VoiceInputController(
             SherpaOnnxSpeechInputEngine(this, downloadProgressListener = ::onAsrDownloadProgress),
             editTextTarget(answerInput),
             object : VoiceInputController.Listener {
                 override fun onListeningChanged(isListening: Boolean) {
-                    btnVoiceAnswer.text = if (isListening) "■" else "🎙"
-                    btnVoiceAnswer.isSelected = isListening
+                    renderInputButton()
                 }
 
                 override fun onError(message: String) {
@@ -223,6 +245,12 @@ class ViewActivity : AppCompatActivity() {
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
             fitPreview(root.width, root.height, bars.top, bars.bottom)
+            // 返回按钮浮在预览画面左上角，状态栏下方
+            val lp = btnBack.layoutParams as FrameLayout.LayoutParams
+            if (lp.topMargin != bars.top + 8.dpToPx()) {
+                lp.topMargin = bars.top + 8.dpToPx()
+                btnBack.layoutParams = lp
+            }
             insets
         }
         findViewById<View>(R.id.view_root).addOnLayoutChangeListener { root, _, _, _, _, _, _, _, _ ->
@@ -232,28 +260,11 @@ class ViewActivity : AppCompatActivity() {
             fitPreview(root.width, root.height, bars.top, bars.bottom)
         }
 
-        // Apply nav bar insets to bottom panel and FAB
-        ViewCompat.setOnApplyWindowInsetsListener(bottomPanel) { view, insets ->
-            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            view.setPadding(
-                view.paddingLeft, view.paddingTop, view.paddingRight,
-                navBarInsets.bottom
-            )
-            insets
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(fab) { view, insets ->
-            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            val lp = view.layoutParams as FrameLayout.LayoutParams
-            lp.bottomMargin = 24.dpToPx() + navBarInsets.bottom
-            view.layoutParams = lp
-            insets
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(resultPanel) { view, insets ->
-            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
-            view.setPadding(
-                view.paddingLeft, view.paddingTop, view.paddingRight,
-                navBarInsets.bottom
-            )
+        // 控制面板悬浮在导航栏上方；展开后输入框弹出键盘时让到键盘上方
+        ViewCompat.setOnApplyWindowInsetsListener(controlPanel) { _, insets ->
+            navBottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            placePanel()
             insets
         }
 
@@ -276,12 +287,9 @@ class ViewActivity : AppCompatActivity() {
             }
         })
 
-        // Touch interceptor: blocks touches in VIEW mode, also collapses panel
+        // Touch interceptor: blocks touches in VIEW mode; tapping the preview collapses the card
         touchInterceptor.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                if (isPanelExpanded) collapsePanel()
-                if (isResultPanelVisible) hideResultPanel()
-            }
+            if (event.action == MotionEvent.ACTION_DOWN && controlPanel.isExpanded) collapsePanel()
             true
         }
 
@@ -294,48 +302,30 @@ class ViewActivity : AppCompatActivity() {
             true
         }
 
-        // FAB click: toggle panel
-        fab.setOnClickListener {
-            if (isPanelExpanded) collapsePanel() else expandPanel()
-        }
+        fab.setOnClickListener { expandPanel() }
+        btnCollapse.setOnClickListener { collapsePanel() }
+        btnBack.setOnClickListener { onBackToChat() }
+        btnTakeover.setOnClickListener { toggleTakeover() }
+        btnStop.setOnClickListener { stopAndReturn() }
 
-        // Control buttons
-        findViewById<Button>(R.id.btn_back).setOnClickListener {
-            onBackToChat()
-        }
-
-        findViewById<Button>(R.id.btn_minimize).setOnClickListener {
-            collapsePanel()
-        }
-
-        btnTakeover.setOnClickListener {
-            toggleTakeover()
-        }
-
-        findViewById<Button>(R.id.btn_stop).setOnClickListener {
-            stopAndReturn()
-        }
-
-        // Answer input: send on IME action
+        // 回答 / 补充输入框：单行输入法动作（发送），但内容长了自动折行
+        answerInput.setHorizontallyScrolling(false)
+        answerInput.maxLines = 4
         answerInput.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEND) {
-                submitAnswer()
+                submitInput()
                 true
             } else false
         }
-        supplementInput.setOnEditorActionListener { _, actionId, _ ->
-            if (actionId == EditorInfo.IME_ACTION_SEND) {
-                submitSupplement()
-                true
-            } else false
+        answerInput.doAfterTextChanged { renderInputButton() }
+        btnSendAnswer.setOnClickListener {
+            when {
+                voiceAnswerController.isListening -> voiceAnswerController.stop()
+                answerInput.text.isNotBlank() -> submitInput()
+                ensureRecordAudioPermission() -> voiceAnswerController.start()
+            }
         }
 
-        btnSendAnswer.setOnClickListener {
-            submitAnswer()
-        }
-        btnSendSupplement.setOnClickListener {
-            submitSupplement()
-        }
         btnHandoffNow.setOnClickListener {
             agentService?.completeUserHandoff("manual_confirm_auto_return")
             setTakeoverMode(false)
@@ -344,28 +334,9 @@ class ViewActivity : AppCompatActivity() {
             agentService?.cancelPendingHandoffReturn()
         }
 
-        btnVoiceAnswer.setOnClickListener {
-            if (voiceAnswerController.isListening) {
-                voiceAnswerController.stop()
-            } else if (ensureRecordAudioPermission()) {
-                voiceAnswerController.start()
-            }
-        }
-
-        // Result panel buttons
-        findViewById<TextView>(R.id.btn_result_close).setOnClickListener {
-            hideResultPanel()
-        }
-        findViewById<Button>(R.id.btn_result_back).setOnClickListener {
-            onBackToChat()
-        }
-        findViewById<Button>(R.id.btn_result_takeover).setOnClickListener {
-            hideResultPanel()
-            toggleTakeover()
-        }
-        findViewById<Button>(R.id.btn_result_stop).setOnClickListener {
-            stopAndReturn()
-        }
+        onBackPressedDispatcher.addCallback(this, collapseOnBack)
+        render()
+        controlPanel.playEntry()
 
         // Bind to AgentService
         Intent(this, AgentService::class.java).also { intent ->
@@ -380,6 +351,7 @@ class ViewActivity : AppCompatActivity() {
         // 跟着 engineFlow 走：预览页开着时换了新任务（新引擎），也能收到新任务的状态
         stateJob = lifecycleScope.launch {
             service.engineFlow.collectLatest { engine ->
+                lastThought = ""
                 engine?.state?.collect { state -> onAgentStateChanged(state) }
             }
         }
@@ -409,7 +381,9 @@ class ViewActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra(EXTRA_SHOW_CONTROLS, false) == true) {
+        val showControls = intent?.getBooleanExtra(EXTRA_SHOW_CONTROLS, false) == true ||
+            intent?.getBooleanExtra(AgentService.EXTRA_SHOW_HANDOFF, false) == true
+        if (showControls) {
             pendingShowControls = true
             mainHandler.post {
                 if (bound) {
@@ -418,9 +392,6 @@ class ViewActivity : AppCompatActivity() {
                     expandPanel()
                 }
             }
-        }
-        if (intent?.getBooleanExtra(AgentService.EXTRA_SHOW_HANDOFF, false) == true) {
-            handoffPanel.visibility = View.VISIBLE
         }
     }
 
@@ -434,199 +405,325 @@ class ViewActivity : AppCompatActivity() {
         Log.d(TAG, "Agent state: $state")
         lastAgentState = state
         applyGlowForState(state)
-
-        when (state) {
-            is AgentState.Running -> {
-                wasRunning = true
-                updateFabIcon("▶", "#FFFFFF")
-                clearAskUserSection()
-                showSupplementSection()
-                hideResultPanel()
-            }
-            is AgentState.WaitingForUser -> {
-                hideSupplementSection()
-                showAskUser(state.question)
-                updateFabIcon("❓", "#FF6D00")
-            }
-            is AgentState.WaitingForHandoff -> {
-                hideSupplementSection()
-                clearAskUserSection()
-                updateFabIcon("⚠", "#FFCBA135")
-                showHandoffActive(state.reason)
-            }
-            is AgentState.Idle -> {
-                updateFabIcon("✓", "#4CAF50")
-                clearAskUserSection()
-                hideSupplementSection()
-                hideHandoffPanel()
-                if (!state.resultMessage.isNullOrBlank()) {
-                    showResultPanel(state.resultMessage, isError = false)
-                }
-                wasRunning = false
-            }
-            is AgentState.Error -> {
-                updateFabIcon("✗", "#F44336")
-                clearAskUserSection()
-                hideSupplementSection()
-                hideHandoffPanel()
-                showResultPanel(state.message, isError = true)
-                wasRunning = false
-            }
-            is AgentState.Paused -> {
-                updateFabIcon("⏸", "#FFFFFF")
-            }
+        if (state is AgentState.Running && isRealThought(state.thought)) {
+            lastThought = state.thought.trim().replace('\n', ' ')
         }
+
+        when {
+            state is AgentState.WaitingForUser -> {
+                autoExpand()
+                answerInput.requestFocus()
+            }
+            state is AgentState.WaitingForHandoff -> autoExpand()
+            (state is AgentState.Idle && !state.resultMessage.isNullOrBlank()) || state is AgentState.Error -> autoExpand()
+        }
+        render()
+        maybeAutoCollapse()
     }
 
     private fun onHandoffUiStateChanged(state: HandoffUiState) {
+        handoffUi = state
         when (state) {
             HandoffUiState.Idle -> {
-                hideHandoffPanel()
                 if (isTakeoverMode &&
                     agentService?.displayState != AgentService.DisplayState.TAKEOVER) {
                     setTakeoverMode(false)
                 }
             }
-            is HandoffUiState.Active -> showHandoffActive(state.reason)
-            is HandoffUiState.PendingReturn -> showHandoffPending(state)
+            is HandoffUiState.Active, is HandoffUiState.PendingReturn -> autoExpand()
         }
+        render()
+        maybeAutoCollapse()
     }
 
-    private fun showHandoffActive(reason: String) {
-        hideSupplementSection()
-        hideAskUserSection()
-        handoffPanel.visibility = View.VISIBLE
-        handoffReason.text = "${getString(R.string.handoff_active_message)}\n\n$reason"
-        handoffCountdownText.visibility = View.GONE
-        handoffPendingActions.visibility = View.GONE
-        panelDivider.visibility = View.VISIBLE
-        expandPanel()
+    /** 敏感输入接管中：卡片不能收起，内容换成接管说明。 */
+    private fun isInHandoff(): Boolean {
+        val s = lastAgentState
+        if (s is AgentState.WaitingForHandoff) return true
+        return handoffUi !is HandoffUiState.Idle && s !is AgentState.Idle && s !is AgentState.Error
     }
 
-    private fun showHandoffPending(state: HandoffUiState.PendingReturn) {
-        hideSupplementSection()
-        hideAskUserSection()
-        handoffPanel.visibility = View.VISIBLE
-        handoffReason.text = state.reason
-        if (state.countdownSeconds > 0) {
-            handoffCountdownText.text = getString(R.string.handoff_pending_message, state.countdownSeconds)
+    // ── 卡片内容 ─────────────────────────────────────────────────────────
+
+    /** 按当前任务状态刷新胶囊和卡片里的全部内容；尺寸变化由面板自己弹过去。 */
+    private fun render() {
+        val s = lastAgentState
+        val handoff = isInHandoff()
+
+        val orb = when {
+            handoff -> AgentIconView.Mode.WAITING
+            isTakeoverMode -> AgentIconView.Mode.IDLE
+            s is AgentState.Running ->
+                if (s.thought.startsWith("Thinking") || s.thought.startsWith("Capturing")) AgentIconView.Mode.THINKING
+                else AgentIconView.Mode.RUNNING
+            s is AgentState.WaitingForUser -> AgentIconView.Mode.WAITING
+            s is AgentState.Idle && s.resultMessage != null -> AgentIconView.Mode.SUCCESS
+            s is AgentState.Error -> AgentIconView.Mode.ERROR
+            else -> AgentIconView.Mode.IDLE
+        }
+        fabIcon.mode = orb
+        panelIcon.mode = orb
+
+        setTextIfChanged(fabText, compactLine(s, handoff))
+        setTextIfChanged(panelTitle, taskTitle())
+        setTextIfChanged(panelMeta, metaLine(s, handoff))
+        val detail = detailLine(s, handoff)
+        // 进展只看最近一句（超出省略）；问题、结果要读全，超出 8 行就在卡片里滚动
+        val readAll = !(s is AgentState.Running && !handoff && !isTakeoverMode)
+        if (readAll != (panelDetail.movementMethod != null)) {
+            panelDetail.movementMethod = if (readAll) ScrollingMovementMethod() else null
+            panelDetail.ellipsize = if (readAll) null else TextUtils.TruncateAt.END
+            panelDetail.maxLines = if (readAll) 8 else 3
+        }
+        if (panelDetail.text.toString() != detail) {
+            panelDetail.text = detail
+            panelDetail.scrollTo(0, 0)
+        }
+        panelDetail.visibility = if (detail.isBlank()) View.GONE else View.VISIBLE
+
+        handoffPanel.visibility = if (handoff) View.VISIBLE else View.GONE
+        val pending = handoffUi as? HandoffUiState.PendingReturn
+        handoffNote.visibility = if (pending == null) View.VISIBLE else View.GONE
+        if (handoff && pending != null && pending.countdownSeconds > 0) {
+            handoffCountdownText.text = getString(R.string.handoff_pending_message, pending.countdownSeconds)
             handoffCountdownText.visibility = View.VISIBLE
             handoffPendingActions.visibility = View.VISIBLE
         } else {
             handoffCountdownText.visibility = View.GONE
             handoffPendingActions.visibility = View.GONE
         }
-        panelDivider.visibility = View.VISIBLE
-        expandPanel()
-    }
 
-    private fun hideHandoffPanel() {
-        handoffPanel.visibility = View.GONE
-        handoffCountdownText.visibility = View.GONE
-        handoffPendingActions.visibility = View.GONE
-        if (currentAskQuestion == null && supplementSection.visibility != View.VISIBLE) {
-            panelDivider.visibility = View.GONE
+        panelProgress.visibility = if (s is AgentState.Running && !handoff) View.VISIBLE else View.GONE
+
+        val answer = s is AgentState.WaitingForUser && !handoff
+        val supplement = s is AgentState.Running && !handoff && !isTakeoverMode
+        inputRow.visibility = if (answer || supplement) View.VISIBLE else View.GONE
+        if (answer != answering) {
+            answering = answer
+            answerInput.text.clear()
         }
+        answerInput.hint = getString(if (answering) R.string.vd_hint_answer else R.string.supplement_hint)
+        if (inputRow.visibility != View.VISIBLE && answerInput.hasFocus()) {
+            if (voiceAnswerController.isListening) voiceAnswerController.stop()
+            hideInputKeyboard()
+            answerInput.clearFocus()
+        }
+        renderInputButton()
+
+        btnTakeover.text = getString(if (isTakeoverMode) R.string.vd_btn_return_control else R.string.vd_btn_take_over)
+        // 接管中这颗按钮是“当前状态”，用强调色实心标出来
+        if (isTakeoverMode) styleButton(btnTakeover, palette.accent, palette.onAccent)
+        else styleButton(btnTakeover, palette.tonalButton, palette.onTonalButton)
+        btnCollapse.visibility = if (handoff) View.INVISIBLE else View.VISIBLE
+        // 接管时返回按钮正好压在画面里 App 自己的返回箭头上，先藏起来
+        val showBack = !isTakeoverMode
+        if (showBack != (btnBack.tag != false)) {
+            btnBack.tag = showBack
+            btnBack.animate().cancel()
+            if (showBack) {
+                btnBack.visibility = View.VISIBLE
+                btnBack.animate().alpha(1f).setDuration(180).start()
+            } else {
+                btnBack.animate().alpha(0f).setDuration(180)
+                    .withEndAction { btnBack.visibility = View.GONE }.start()
+            }
+            btnBack.isClickable = showBack
+        }
+        syncBackCallback()
     }
 
-    // ── FAB and Panel ───────────────────────────────────────────────────
+    private fun syncBackCallback() {
+        collapseOnBack.isEnabled = controlPanel.isExpanded && !isInHandoff()
+    }
 
-    private fun updateFabIcon(icon: String, color: String) {
-        fabIcon.text = icon
-        fabIcon.setTextColor(android.graphics.Color.parseColor(color))
+    private fun compactLine(s: AgentState?, handoff: Boolean): String = when {
+        handoff -> getString(R.string.island_waiting_handoff)
+        isTakeoverMode -> getString(R.string.vd_status_takeover)
+        s is AgentState.Running -> {
+            val step = getString(R.string.island_step, s.step)
+            val thought = currentThought()
+            if (thought.isEmpty()) step else "$step · $thought"
+        }
+        s is AgentState.WaitingForUser -> getString(R.string.island_waiting_answer)
+        s is AgentState.Paused -> getString(R.string.overlay_paused)
+        s is AgentState.Idle && s.resultMessage != null -> getString(R.string.island_done)
+        s is AgentState.Error -> getString(R.string.island_failed)
+        else -> taskTitle()
+    }
+
+    private fun metaLine(s: AgentState?, handoff: Boolean): String = when {
+        handoff -> getString(R.string.handoff_title)
+        isTakeoverMode -> getString(R.string.vd_meta_takeover)
+        s is AgentState.Running -> getString(R.string.assist_task_running, s.step)
+        s is AgentState.WaitingForUser -> getString(R.string.assist_task_waiting_answer)
+        s is AgentState.Paused -> getString(R.string.overlay_paused)
+        s is AgentState.Idle && s.resultMessage != null -> getString(R.string.island_done)
+        s is AgentState.Error -> getString(R.string.island_failed)
+        else -> getString(R.string.vd_status_idle)
+    }
+
+    private fun detailLine(s: AgentState?, handoff: Boolean): String = when {
+        handoff -> when (val h = handoffUi) {
+            is HandoffUiState.Active -> h.reason
+            is HandoffUiState.PendingReturn -> h.reason
+            HandoffUiState.Idle -> (s as? AgentState.WaitingForHandoff)?.reason
+        }.orEmpty().ifBlank { getString(R.string.handoff_reason_default) }
+        isTakeoverMode -> getString(R.string.vd_takeover_hint)
+        s is AgentState.Running -> currentThought().ifBlank { getString(R.string.overlay_running) }
+        s is AgentState.WaitingForUser -> s.question
+        s is AgentState.Idle -> s.resultMessage.orEmpty()
+        s is AgentState.Error -> s.message
+        else -> ""
+    }
+
+    private fun taskTitle(): String =
+        agentService?.currentInstruction?.trim()?.replace('\n', ' ')?.ifBlank { null } ?: getString(R.string.app_name)
+
+    private fun currentThought(): String = lastThought.ifBlank { agentService?.latestThought.orEmpty() }
+
+    /** 引擎内部的占位文案（截图中 / 思考中 / 执行中）不适合给人看，只显示模型的真实想法。 */
+    private fun isRealThought(thought: String): Boolean {
+        val t = thought.trim()
+        return t.isNotEmpty() && !t.startsWith("Capturing") && !t.startsWith("Thinking") && !t.startsWith("Executing")
+    }
+
+    private fun setTextIfChanged(view: TextView, value: String) {
+        if (view.text.toString() != value) view.text = value
+    }
+
+    // ── 样式 ─────────────────────────────────────────────────────────────
+
+    /** 把莫奈色板套到文字、按钮、输入框上（布局里不写死颜色，色板随壁纸变）。 */
+    private fun applyPalette() {
+        fabText.setTextColor(palette.text)
+        panelTitle.setTextColor(palette.text)
+        panelMeta.setTextColor(palette.textSecondary)
+        panelDetail.setTextColor(palette.textBody)
+        handoffNote.setTextColor(palette.textSecondary)
+        handoffCountdownText.setTextColor(palette.text)
+        answerInput.setTextColor(palette.text)
+        answerInput.setHintTextColor(palette.textSecondary)
+        answerInput.highlightColor = palette.accent and 0x00FFFFFF or 0x55000000
+        answerInput.textCursorDrawable = GradientDrawable().apply {
+            setColor(palette.accent)
+            setSize(maxOf(2, 2.dpToPx()), 0)
+        }
+        inputRow.background = GradientDrawable().apply {
+            cornerRadius = 24.dpToPx().toFloat()
+            setColor(palette.ghost)
+        }
+        // 返回：浮在画面上的半透明圆形按钮，比面板低一级（更透明、细描边、不带投影）
+        btnBack.imageTintList = ColorStateList.valueOf(palette.text)
+        btnBack.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(palette.surfaceLite)
+                setStroke(maxOf(1, 1.dpToPx() / 2), palette.hairlineStrong)
+            },
+            null,
+        )
+        btnCollapse.imageTintList = ColorStateList.valueOf(palette.textSecondary)
+        btnCollapse.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(palette.ghost) },
+            null,
+        )
+        styleButton(btnStop, palette.dangerButton, palette.onDangerButton)
+        styleButton(btnHandoffNow, palette.accent, palette.onAccent)
+        styleButton(btnHandoffCancel, palette.tonalButton, palette.onTonalButton)
+    }
+
+    /** 扁平按钮：色块底 + 左侧线性图标 + 文字，图标和文字同色（同任务浮窗 / 语音助手）。 */
+    private fun styleButton(button: TextView, bg: Int, fg: Int) {
+        button.setTextColor(fg)
+        button.compoundDrawableTintList = ColorStateList.valueOf(fg)
+        button.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply { cornerRadius = 20.dpToPx().toFloat(); setColor(bg) },
+            null,
+        )
+    }
+
+    /** 输入框右边只有一颗按钮：空着是麦克风（聆听时强调色实心），有内容就变成发送。 */
+    private fun renderInputButton() {
+        val listening = voiceAnswerController.isListening
+        val send = !listening && answerInput.text.isNotBlank()
+        val filled = listening || send
+        val oval = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(if (filled) palette.accent else 0xFFFFFFFF.toInt())
+        }
+        btnSendAnswer.background = if (filled) {
+            RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), oval, null)
+        } else {
+            RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), null, oval)
+        }
+        btnSendAnswer.imageTintList = ColorStateList.valueOf(if (filled) palette.onAccent else palette.textSecondary)
+        btnSendAnswer.setImageResource(if (send) R.drawable.ic_assist_send else R.drawable.ic_assist_mic)
+        btnSendAnswer.contentDescription = getString(if (send) R.string.cd_send else R.string.cd_voice_input)
+    }
+
+    // ── 展开 / 收起 ──────────────────────────────────────────────────────
+
+    private fun placePanel() {
+        val lp = controlPanel.layoutParams as FrameLayout.LayoutParams
+        val bottom = if (controlPanel.isExpanded) maxOf(navBottom, imeBottom) else navBottom
+        val margin = bottom + 10.dpToPx() - controlPanel.panel.shadowMargin
+        if (lp.bottomMargin != margin) {
+            lp.bottomMargin = margin
+            controlPanel.layoutParams = lp
+        }
     }
 
     private fun expandPanel() {
-        if (isPanelExpanded) return
-        isPanelExpanded = true
+        if (controlPanel.isExpanded) return
         Log.i(TAG, "Bottom panel expanded")
-        if (handoffPanel.visibility != View.VISIBLE) {
-            restoreAskUserSection()
-        }
-        fab.visibility = View.GONE
-        bottomPanel.visibility = View.VISIBLE
-        bottomPanel.translationY = bottomPanel.height.toFloat().coerceAtLeast(300f)
-        bottomPanel.animate()
-            .translationY(0f)
-            .setDuration(200)
-            .start()
+        if (lastAgentState is AgentState.WaitingForUser) Log.i(TAG, "Ask user section restored")
+        controlPanel.setExpanded(true)
+        placePanel()
+        syncBackCallback()
+    }
+
+    /** 自动展开（等用户 / 任务结束）；用户已经自己点开的不算自动展开。 */
+    private fun autoExpand() {
+        if (controlPanel.isExpanded) return
+        expandPanel()
+        autoExpanded = true
+    }
+
+    private fun maybeAutoCollapse() {
+        if (autoExpanded && lastAgentState is AgentState.Running && !isInHandoff()) collapsePanel()
     }
 
     private fun collapsePanel() {
-        if (!isPanelExpanded) return
-        if (handoffPanel.visibility == View.VISIBLE) return
-        bottomPanel.animate()
-            .translationY(bottomPanel.height.toFloat())
-            .setDuration(200)
-            .withEndAction {
-                bottomPanel.visibility = View.GONE
-                if (currentAskQuestion == null) {
-                    hideAskUserSection()
-                }
-                fab.visibility = View.VISIBLE
-                isPanelExpanded = false
-                Log.i(TAG, "Bottom panel collapsed")
-            }
-            .start()
+        if (!controlPanel.isExpanded || isInHandoff()) return
+        autoExpanded = false
+        if (voiceAnswerController.isListening) voiceAnswerController.stop()
+        hideInputKeyboard()
+        answerInput.clearFocus()
+        controlPanel.setExpanded(false)
+        placePanel()
+        syncBackCallback()
+        Log.i(TAG, "Bottom panel collapsed")
     }
 
-    // ── Ask User ────────────────────────────────────────────────────────
-
-    private fun showAskUser(question: String) {
-        currentAskQuestion = question
-        questionText.text = question
-        askUserSection.visibility = View.VISIBLE
-        panelDivider.visibility = View.VISIBLE
-        answerInput.text.clear()
-        answerInput.requestFocus()
-        expandPanel()
+    private fun hideInputKeyboard() {
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(answerInput.windowToken, 0)
     }
 
-    private fun hideAskUserSection() {
-        askUserSection.visibility = View.GONE
-        panelDivider.visibility = View.GONE
-    }
+    // ── 回答 / 补充 ──────────────────────────────────────────────────────
 
-    private fun clearAskUserSection() {
-        currentAskQuestion = null
-        hideAskUserSection()
-    }
-
-    private fun restoreAskUserSection() {
-        val question = currentAskQuestion ?: return
-        questionText.text = question
-        askUserSection.visibility = View.VISIBLE
-        panelDivider.visibility = View.VISIBLE
-        Log.i(TAG, "Ask user section restored")
-    }
-
-    private fun submitAnswer() {
+    private fun submitInput() {
         val text = answerInput.text.toString().trim()
         if (text.isEmpty()) return
-        agentService?.submitUserResponse(text)
-        answerInput.text.clear()
-        currentAskQuestion = null
-        collapsePanel()
-    }
-
-    private fun showSupplementSection() {
-        if (currentAskQuestion != null || handoffPanel.visibility == View.VISIBLE) return
-        supplementSection.visibility = View.VISIBLE
-        panelDivider.visibility = View.VISIBLE
-    }
-
-    private fun hideSupplementSection() {
-        supplementSection.visibility = View.GONE
-        if (currentAskQuestion == null) {
-            panelDivider.visibility = View.GONE
+        if (voiceAnswerController.isListening) voiceAnswerController.stop()
+        if (answering) {
+            agentService?.submitUserResponse(text)
+        } else {
+            agentService?.submitUserSupplement(text)
         }
-    }
-
-    private fun submitSupplement() {
-        val text = supplementInput.text.toString().trim()
-        if (text.isEmpty()) return
-        agentService?.submitUserSupplement(text)
-        supplementInput.text.clear()
+        answerInput.text.clear()
         collapsePanel()
     }
 
@@ -698,61 +795,6 @@ class ViewActivity : AppCompatActivity() {
         asrDownloadProgressBar = null
     }
 
-    // ── Result Panel ─────────────────────────────────────────────────────
-
-    private fun showResultPanel(message: String, isError: Boolean) {
-        if (isPanelExpanded) collapsePanel()
-        fab.visibility = View.GONE
-        resultMessage.text = message
-        if (isError) {
-            resultIcon.text = "✗"
-            resultIcon.setTextColor(ContextCompat.getColor(this, R.color.color_danger))
-        } else {
-            resultIcon.text = "✓"
-            resultIcon.setTextColor(ContextCompat.getColor(this, R.color.color_success))
-        }
-        resultPanel.visibility = View.VISIBLE
-        resultPanel.translationY = resultPanel.height.toFloat().coerceAtLeast(300f)
-        resultPanel.animate()
-            .translationY(0f)
-            .setDuration(250)
-            .start()
-        isResultPanelVisible = true
-    }
-
-    private fun hideResultPanel() {
-        if (!isResultPanelVisible) return
-        resultPanel.animate()
-            .translationY(resultPanel.height.toFloat())
-            .setDuration(200)
-            .withEndAction {
-                resultPanel.visibility = View.GONE
-                fab.visibility = View.VISIBLE
-            }
-            .start()
-        isResultPanelVisible = false
-    }
-
-    // ── Banner ──────────────────────────────────────────────────────────
-
-    private fun showBanner(message: String, color: String) {
-        mainHandler.removeCallbacks(bannerDismissRunnable)
-        statusBanner.text = message
-        statusBanner.background.setTint(android.graphics.Color.parseColor(color))
-        statusBanner.visibility = View.VISIBLE
-        statusBanner.alpha = 0f
-        statusBanner.animate().alpha(1f).setDuration(200).start()
-        mainHandler.postDelayed(bannerDismissRunnable, BANNER_DISMISS_MS)
-    }
-
-    private fun hideBanner() {
-        statusBanner.animate()
-            .alpha(0f)
-            .setDuration(200)
-            .withEndAction { statusBanner.visibility = View.GONE }
-            .start()
-    }
-
     // ── Takeover ────────────────────────────────────────────────────────
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -780,7 +822,6 @@ class ViewActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        mainHandler.removeCallbacks(bannerDismissRunnable)
         stateJob?.cancel()
         handoffUiJob?.cancel()
         voiceAnswerController.destroy()
@@ -838,16 +879,15 @@ class ViewActivity : AppCompatActivity() {
         isTakeoverMode = takeover
         if (takeover) {
             touchInterceptor.visibility = View.GONE
-            btnTakeover.text = getString(R.string.vd_btn_return_control)
             takeoverKeyboardProxy.isEnabled = true
             collapsePanel()
         } else {
             hideTakeoverKeyboard()
             takeoverKeyboardProxy.isEnabled = false
             touchInterceptor.visibility = View.VISIBLE
-            btnTakeover.text = getString(R.string.vd_btn_take_over)
         }
         applyGlowForState(lastAgentState)
+        render()
         Log.i(TAG, "Takeover mode: $takeover")
     }
 
@@ -963,7 +1003,7 @@ class ViewActivity : AppCompatActivity() {
     }
 
     private fun showTakeoverKeyboard() {
-        if (!isTakeoverMode || isPanelExpanded || isResultPanelVisible) return
+        if (!isTakeoverMode || controlPanel.isExpanded) return
         takeoverKeyboardProxy.requestFocus()
         val imm = getSystemService(InputMethodManager::class.java)
         imm.showSoftInput(takeoverKeyboardProxy, InputMethodManager.SHOW_IMPLICIT)
@@ -978,10 +1018,7 @@ class ViewActivity : AppCompatActivity() {
 
     private fun shouldHandleKeyLocally(): Boolean {
         val focus = currentFocus ?: return false
-        return focus == answerInput || focus == btnSendAnswer || focus == btnVoiceAnswer ||
-                focus == supplementInput || focus == btnSendSupplement ||
-                focus == btnTakeover || focus == btnHandoffNow || focus == btnHandoffCancel ||
-                isPanelExpanded || isResultPanelVisible || handoffPendingActions.visibility == View.VISIBLE
+        return focus == answerInput || controlPanel.isExpanded || handoffPendingActions.visibility == View.VISIBLE
     }
 
     private fun Int.dpToPx(): Int =

@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="vd_btn_back">返回</string>
-    <string name="vd_btn_minimize">最小化</string>
     <string name="vd_btn_take_over">接管</string>
     <string name="vd_btn_return_control">退出接管</string>
     <string name="vd_btn_stop">停止</string>
     <string name="vd_hint_answer">请输入回答...</string>
-    <string name="vd_cd_minimize">最小化到悬浮窗</string>
     <string name="handoff_title">需要你接管输入</string>
     <string name="handoff_active_message">请在设备上完成敏感输入。Agent 不会读取或保存你输入的内容。</string>
     <string name="handoff_pending_message">将在 %1$d 秒后交还给 agent。</string>
@@ -122,7 +120,6 @@
     <string name="notif_task_failed_title">任务失败</string>
 
     <!-- Supplement info (VD view) -->
-    <string name="supplement_info">补充信息</string>
 
     <!-- Notifications -->
     <string name="notif_needs_answer">OpenCyvis 需要回答</string>
@@ -321,4 +318,10 @@
     <string name="pref_island_a11y_summary_off">未开启：浮窗在锁屏和系统设置页会被隐藏。点此开启 OpenCyvis 无障碍服务</string>
     <string name="pref_island_a11y_summary_on">已开启：浮窗在锁屏和系统设置页之上也能显示</string>
     <string name="island_collapse">收起</string>
+    <string name="vd_status_takeover">接管中</string>
+    <string name="vd_meta_takeover">接管中 · Agent 已暂停</string>
+    <string name="vd_takeover_hint">直接在画面上操作，完成后点「退出接管」，Agent 会接着做。</string>
+    <string name="vd_status_idle">空闲</string>
+    <string name="cd_send">发送</string>
+    <string name="cd_voice_input">语音输入</string>
 </resources>

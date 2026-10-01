@@ -24,6 +24,13 @@ class AssistantSession(context: Context) : VoiceInteractionSession(context) {
             w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
             w.setDecorFitsSystemWindows(false)
             w.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            // 会话的系统主题带着旧的半透明系统栏标志，DecorView 会在导航栏后面垫一层约 30% 的黑，
+            // 设透明色也盖不掉；窗口一出现底部就硬切变暗，收起后又硬切变亮。清掉，系统栏背景由我们自己画（透明）
+            @Suppress("DEPRECATION")
+            w.clearFlags(
+                WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS or WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION
+            )
+            w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
             // 说话、看进度时屏幕不能自己暗下去（锁屏时系统亮屏超时尤其短）
             w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             w.attributes = w.attributes.apply {
