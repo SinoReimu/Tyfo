@@ -132,6 +132,7 @@ class ViewActivity : AppCompatActivity() {
             agentService = service
             bound = true
             Log.i(TAG, "Bound to AgentService")
+            service.markViewing()
 
             // Connect SurfaceView to VD if surface is already ready
             if (surfaceView.holder.surface.isValid) {

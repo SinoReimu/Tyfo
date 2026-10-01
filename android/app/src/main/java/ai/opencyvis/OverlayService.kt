@@ -225,7 +225,8 @@ class OverlayService : Service() {
         val service = agentService
         val state = service?.stateFlow?.value
         val active = service?.isOverlayActiveState(state) == true
-        val shouldShow = !isAppInForeground && active
+        // 系统实况窗能用时进度只走实况窗，不再叠一个悬浮岛
+        val shouldShow = !isAppInForeground && active && !ai.opencyvis.LiveUpdates.isAvailable(this)
         Log.d(TAG, "evaluateVisibility: fg=$isAppInForeground active=$active → show=$shouldShow")
         if (shouldShow) overlayWindow?.attach() else overlayWindow?.detach()
     }

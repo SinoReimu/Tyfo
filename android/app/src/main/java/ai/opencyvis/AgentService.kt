@@ -81,6 +81,9 @@ class AgentService : Service() {
         // 执行中的实时进度：普通重要性（锁屏上能看到）但不响铃不振动
         private const val CHANNEL_PROGRESS = "opencyvis_progress"
         private const val ACTION_STOP_TASK = "ai.opencyvis.STOP_TASK"
+        private const val ACTION_DISMISS_RESULT = "ai.opencyvis.DISMISS_RESULT"
+        /** 用户划掉了执行中的进度实况窗：onStartCommand 开头的 startForeground 会把它重新挂回去。 */
+        private const val ACTION_NOTIFICATION_SWIPED = "ai.opencyvis.NOTIFICATION_SWIPED"
         private const val NOTIFICATION_ID = 1001
         private const val NOTIFICATION_ASK_ID = 1002
         private const val NOTIFICATION_COMPLETED_ID = 1003
@@ -195,6 +198,12 @@ class AgentService : Service() {
     private var historyObserverJob: Job? = null
     private var historyStateObserverJob: Job? = null
     private var progressObserverJob: Job? = null
+    /** 进度通知的已执行时长从这里算。 */
+    private var taskStartedAt = 0L
+    /** 任务结束后的结果实况窗还挂着：别让后续的状态文案把它顶掉，用户关掉或开始新任务时清除。 */
+    private var resultNotificationShown = false
+    /** 当前是否处于前台服务状态（挂着前台通知）。 */
+    private var inForeground = false
     private var lastNotification: Notification? = null
     private var lastHistoryStatus: String? = null
     private var handoffObserverJob: Job? = null
@@ -256,17 +265,31 @@ class AgentService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 任务进行中被再次拉起（比如语音助手）时沿用当前的进度通知，别把它刷回“待命”
-        startForeground(NOTIFICATION_ID, lastNotification ?: buildNotification("OpenCyvis agent ready"))
+        // startForegroundService() 拉起后必须进一次前台（任务进行中沿用当前的进度通知）。
+        // 空闲时处理完马上退出：前台通知系统会推迟约 10 秒才显示，所以不会露出一条“待命”通知
+        enterForeground()
+        handleStartCommand(intent)
+        leaveForegroundIfIdle()
+        return START_STICKY
+    }
 
+    private fun handleStartCommand(intent: Intent?) {
+        if (intent?.action == ACTION_NOTIFICATION_SWIPED) {
+            Log.i(TAG, "Live notification swiped away, re-posted")
+            return
+        }
+        if (intent?.action == ACTION_DISMISS_RESULT) {
+            resultNotificationShown = false
+            return
+        }
         if (intent?.action == ACTION_STOP_TASK) {
             Log.i(TAG, "Stop requested from notification")
             if (isTaskActive) stopAgent()
-            return START_STICKY
+            return
         }
 
         if (intent?.action == "ai.opencyvis.START_SCHEDULED") {
-            val instruction = intent.getStringExtra("instruction") ?: return START_STICKY
+            val instruction = intent.getStringExtra("instruction") ?: return
             Log.i(TAG, "Scheduled task triggered: $instruction")
             if (startAgent(instruction) == StartResult.BUSY) {
                 // 不打断用户正在跑的任务，这一次定时触发直接跳过
@@ -275,7 +298,7 @@ class AgentService : Service() {
                     getString(R.string.task_skipped_busy, instruction)
                 )
             }
-            return START_STICKY
+            return
         }
 
         // Support starting agent via intent extra (e.g. from adb)
@@ -284,8 +307,34 @@ class AgentService : Service() {
             Log.i(TAG, "Starting agent from intent: $instruction")
             startAgent(instruction)
         }
+    }
 
-        return START_STICKY
+    /**
+     * 只有任务进行中、或任务结束后的结果实况窗还挂着时才做前台服务，空闲时不挂常驻的“待命”通知。
+     * 远程 IM 有自己的前台服务，定时任务由闹钟带着任务拉起，都不靠这里常驻。
+     */
+    private fun enterForeground(notification: Notification? = null) {
+        try {
+            startForeground(NOTIFICATION_ID, notification ?: lastNotification ?: buildNotification("OpenCyvis"))
+            inForeground = true
+        } catch (e: Exception) {
+            // 后台不允许起前台服务时任务照跑，只是进程没有前台保护
+            Log.w(TAG, "startForeground refused: ${e.message}")
+        }
+    }
+
+    private fun needsForeground(): Boolean =
+        taskStarting || engine?.state?.value.isTaskActive || resultNotificationShown
+
+    /** 空闲了就退出前台，前台通知随之撤掉。 */
+    private fun leaveForegroundIfIdle() {
+        if (needsForeground()) return
+        if (inForeground) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            inForeground = false
+        }
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        lastNotification = null
     }
 
     override fun onDestroy() {
@@ -411,6 +460,8 @@ class AgentService : Service() {
             endActiveTask()
         }
         taskStarting = true
+        resultNotificationShown = false
+        enterForeground(buildNotification(getString(R.string.notif_progress_running)))
         latestThought = ""
         val serial = ++startSerial
         cancelIdleVdRelease()
@@ -555,6 +606,7 @@ class AgentService : Service() {
             newEngine.start(instruction)
             taskStarting = false
             startJob = null
+            taskStartedAt = System.currentTimeMillis()
 
             updateNotification("Running: ${instruction.take(30)}...")
             Log.i(TAG, "Agent started with instruction: $instruction")
@@ -610,7 +662,7 @@ class AgentService : Service() {
         taskStarting = false
         startJob = null
         currentInstruction = ""
-        updateNotification(reason)
+        leaveForegroundIfIdle()
         _taskEvents.tryEmit(TaskEvent.StartFailed(serial, reason))
         Toast.makeText(this, reason, Toast.LENGTH_SHORT).show()
         scheduleIdleVdRelease()
@@ -644,6 +696,7 @@ class AgentService : Service() {
         historyObserverJob?.cancel()
         historyStateObserverJob?.cancel()
         progressObserverJob?.cancel()
+        resultNotificationShown = false
         askObserverJob?.cancel()
         cancelAskNotification()
 
@@ -1140,24 +1193,34 @@ class AgentService : Service() {
                     releaseAgentWakeLock()
                     mainHandler.post { scheduleIdleVdRelease() }
 
+                    // 任务结束：撤掉进度通知（实况窗），换回普通的前台通知
+                    progressObserverJob?.cancel()
                     // Update foreground notification + post completion notification if in background
                     val isBackground = !androidx.lifecycle.ProcessLifecycleOwner.get()
                         .lifecycle.currentState.isAtLeast(
                             androidx.lifecycle.Lifecycle.State.STARTED)
+                    // 有实况窗时结果常驻在实况窗里，不再另发一条完成通知
+                    val liveUpdates = LiveUpdates.isAvailable(this@AgentService)
                     when (state) {
                         is AgentState.Idle -> {
-                            updateNotification(getString(R.string.notif_task_completed))
-                            if (isBackground) {
-                                val body = state.resultMessage ?: currentInstruction
-                                postCompletionNotification(
-                                    getString(R.string.notif_task_completed), body)
+                            val body = state.resultMessage ?: currentInstruction
+                            if (liveUpdates) {
+                                postResultNotification(success = true, summary = body)
+                            } else {
+                                leaveForegroundIfIdle()
+                                if (isBackground) {
+                                    postCompletionNotification(getString(R.string.notif_task_completed), body)
+                                }
                             }
                         }
                         is AgentState.Error -> {
-                            updateNotification(getString(R.string.notif_task_failed_title))
-                            if (isBackground) {
-                                postCompletionNotification(
-                                    getString(R.string.notif_task_failed_title), state.message)
+                            if (liveUpdates) {
+                                postResultNotification(success = false, summary = state.message)
+                            } else {
+                                leaveForegroundIfIdle()
+                                if (isBackground) {
+                                    postCompletionNotification(getString(R.string.notif_task_failed_title), state.message)
+                                }
                             }
                         }
                         else -> {}
@@ -1227,7 +1290,7 @@ class AgentService : Service() {
         }
 
         displayState = DisplayState.CHAT
-        updateNotification("Agent stopped")
+        leaveForegroundIfIdle()
         Log.i(TAG, "Agent stopped, app moved to Display 0")
     }
 
@@ -1510,6 +1573,11 @@ class AgentService : Service() {
 
     fun getVirtualDisplayManager(): VirtualDisplayManager? = virtualDisplayManager
 
+    /** 预览页被直接打开（实况窗上的“查看画面”）时补上 VIEW 状态，接管等逻辑依赖它。 */
+    fun markViewing() {
+        if (displayState == DisplayState.CHAT) displayState = DisplayState.VIEW
+    }
+
     fun isOverlayActiveState(state: AgentState?): Boolean {
         return OverlayStatePolicy.isActive(state, displayState)
     }
@@ -1567,16 +1635,22 @@ class AgentService : Service() {
     }
 
     private fun updateNotification(text: String) {
+        // 进度 / 结果实况窗挂着时由它占着前台通知，进入预览、接管这些状态文案别把它顶掉
+        if (progressObserverJob?.isActive == true || resultNotificationShown) return
+        if (!inForeground) return
         val nm = getSystemService(NotificationManager::class.java)
         val notification = buildNotification(text)
         lastNotification = notification
         nm.notify(NOTIFICATION_ID, notification)
     }
 
+    private enum class ProgressPhase { RUNNING, WAITING, HANDOFF, PAUSED }
+
     /**
-     * 执行中把前台通知换成实时进度（第 N 步 · 模型的想法），锁屏上也能跟进度：
-     * 悬浮窗属于普通应用窗口，锁屏时会被系统隐藏，通知是锁屏上唯一稳定可见的地方。
-     * 锁屏隐藏敏感内容时只显示脱敏的公开版本（第 N 步），不泄露任务内容。
+     * 任务进行中把前台通知换成实时进度：模型在做什么 / 在等你什么，外加已执行时长。
+     * 系统支持时它会被提升为实况窗（见 [LiveUpdates]）：执行中状态栏胶囊走表显示已执行时长，
+     * 等输入 / 等接管 / 暂停时显示对应短字，点开直接到要处理的地方。
+     * 锁屏隐藏敏感内容时只显示脱敏的公开版本，不泄露任务内容。
      */
     private fun observeProgressNotification() {
         progressObserverJob?.cancel()
@@ -1585,57 +1659,180 @@ class AgentService : Service() {
             var lastKey: String? = null
             var thought = ""
             eng.state.collect { state ->
-                if (state !is AgentState.Running) return@collect
-                val t = state.thought.trim()
-                // 引擎内部的占位文案（截图中 / 思考中 / 执行中）不展示
-                if (t.isNotEmpty() && !t.startsWith("Capturing") && !t.startsWith("Thinking") && !t.startsWith("Executing")) {
-                    thought = t.replace('\n', ' ')
-                    latestThought = thought
+                val phase: ProgressPhase
+                val detail: String
+                when (state) {
+                    is AgentState.Running -> {
+                        phase = ProgressPhase.RUNNING
+                        val t = state.thought.trim()
+                        // 引擎内部的占位文案（截图中 / 思考中 / 执行中）不展示
+                        if (t.isNotEmpty() && !t.startsWith("Capturing") && !t.startsWith("Thinking") && !t.startsWith("Executing")) {
+                            thought = t.replace('\n', ' ')
+                            latestThought = thought
+                        }
+                        detail = thought
+                    }
+                    is AgentState.WaitingForUser -> {
+                        phase = ProgressPhase.WAITING
+                        detail = state.question.replace('\n', ' ')
+                    }
+                    is AgentState.WaitingForHandoff -> {
+                        phase = ProgressPhase.HANDOFF
+                        detail = state.reason.replace('\n', ' ')
+                    }
+                    is AgentState.Paused -> {
+                        phase = ProgressPhase.PAUSED
+                        detail = ""
+                    }
+                    else -> return@collect
                 }
-                val key = "${state.step}|$thought"
+                val key = "$phase|$detail"
                 if (key == lastKey) return@collect
                 lastKey = key
-                postProgressNotification(state.step, thought)
+                postProgressNotification(phase, detail)
             }
         }
     }
 
-    private fun postProgressNotification(step: Int, thought: String) {
-        val openIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, ai.opencyvis.ui.ControlPanelActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    /**
+     * Android 14 起常驻通知也能被用户划掉，没法直接禁止；执行中的进度实况窗被划掉时服务收到这个回调，
+     * 重新挂上同一条通知，等于划不掉。结果卡片不用它，划掉就是关闭。
+     */
+    private fun swipeBackIntent(): PendingIntent = PendingIntent.getService(
+        this, 9,
+        Intent(this, AgentService::class.java).setAction(ACTION_NOTIFICATION_SWIPED),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun postProgressNotification(phase: ProgressPhase, detail: String) {
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        // 点开到要处理的地方：等输入打开回答框，等接管打开预览页的接管面板，其余回到对话
+        val contentIntent = when (phase) {
+            ProgressPhase.WAITING -> PendingIntent.getActivity(
+                this, 7,
+                Intent(this, ai.opencyvis.ui.ControlPanelActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    .putExtra(EXTRA_FOCUS_ASK, true),
+                flags
+            )
+            ProgressPhase.HANDOFF -> PendingIntent.getActivity(
+                this, 8,
+                Intent(this, ai.opencyvis.ui.ViewActivity::class.java)
+                    .putExtra(EXTRA_SHOW_HANDOFF, true)
+                    .putExtra(ai.opencyvis.ui.ViewActivity.EXTRA_SHOW_CONTROLS, true),
+                flags
+            )
+            else -> PendingIntent.getActivity(
+                this, 0, Intent(this, ai.opencyvis.ui.ControlPanelActivity::class.java), flags
+            )
+        }
+        // 直接打开预览页（悬浮岛上“查看画面”的替代），预览页连上服务后自己挂到虚拟屏上
+        val viewIntent = PendingIntent.getActivity(
+            this, 4, Intent(this, ai.opencyvis.ui.ViewActivity::class.java), flags
         )
         val stopIntent = PendingIntent.getService(
-            this, 3,
-            Intent(this, AgentService::class.java).setAction(ACTION_STOP_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 3, Intent(this, AgentService::class.java).setAction(ACTION_STOP_TASK), flags
         )
-        val stepText = getString(R.string.notif_progress_step, step)
-        val body = if (thought.isBlank()) stepText else "$stepText · $thought"
+        val status = when (phase) {
+            ProgressPhase.RUNNING -> getString(R.string.notif_progress_running)
+            ProgressPhase.WAITING -> getString(R.string.notif_progress_waiting)
+            ProgressPhase.HANDOFF -> getString(R.string.notif_progress_handoff)
+            ProgressPhase.PAUSED -> getString(R.string.notif_progress_paused)
+        }
+        val body = when {
+            detail.isBlank() -> status
+            phase == ProgressPhase.RUNNING -> detail
+            else -> "$status · $detail"
+        }
         val publicVersion = Notification.Builder(this, CHANNEL_PROGRESS)
             .setContentTitle(getString(R.string.notif_progress_public_title))
-            .setContentText(stepText)
+            .setContentText(status)
             .setSmallIcon(R.drawable.ic_notification)
+            .setWhen(taskStartedAt)
+            .setUsesChronometer(true)
             .build()
         val builder = Notification.Builder(this, CHANNEL_PROGRESS)
             .setContentTitle(currentInstruction.ifBlank { getString(R.string.app_name) })
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentIntent(openIntent)
+            .setContentIntent(contentIntent)
+            .setDeleteIntent(swipeBackIntent())
+            .addAction(Notification.Action.Builder(null, getString(R.string.island_open), viewIntent).build())
             .addAction(Notification.Action.Builder(null, getString(R.string.overlay_stop), stopIntent).build())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_PROGRESS)
-            // 不放进度条：折叠状态下系统会用进度条顶掉正文，锁屏上就只剩标题看不到步骤了
+            // 已执行时长：通知头部和实况窗胶囊都会自己走表
+            .setWhen(taskStartedAt)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            // 不放进度条：总步数事先不知道，给不出真实进度
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
+            .setPublicVersion(publicVersion)
+        if (android.os.Build.VERSION.SDK_INT >= 36 && phase != ProgressPhase.RUNNING) {
+            // 胶囊上的短字；执行中不设，胶囊就显示走表的已执行时长
+            builder.setShortCriticalText(
+                getString(
+                    when (phase) {
+                        ProgressPhase.WAITING -> R.string.notif_progress_short_waiting
+                        ProgressPhase.HANDOFF -> R.string.notif_progress_short_handoff
+                        else -> R.string.notif_progress_short_paused
+                    }
+                )
+            )
+        }
+        LiveUpdates.requestPromotion(builder)
+        val notification = builder.build()
+        lastNotification = notification
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * 任务结束后常驻一个结果实况窗：胶囊显示“已完成 / 失败”，点开看完成总结（对话页），
+     * 用户点“关闭”或开始新任务时才撤掉。
+     */
+    private fun postResultNotification(success: Boolean, summary: String) {
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val openIntent = PendingIntent.getActivity(
+            this, 5,
+            Intent(this, ai.opencyvis.ui.ControlPanelActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            flags
+        )
+        val dismissIntent = PendingIntent.getService(
+            this, 6, Intent(this, AgentService::class.java).setAction(ACTION_DISMISS_RESULT), flags
+        )
+        val title = getString(if (success) R.string.notif_task_completed else R.string.notif_task_failed_title)
+        val body = summary.replace('\n', ' ').ifBlank { currentInstruction }
+        val publicVersion = Notification.Builder(this, CHANNEL_PROGRESS)
+            .setContentTitle(title)
+            .setSmallIcon(R.drawable.ic_notification)
+            .build()
+        val builder = Notification.Builder(this, CHANNEL_PROGRESS)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentIntent(openIntent)
+            // 结果卡片可以划掉，划掉等同于点“关闭”
+            .setDeleteIntent(dismissIntent)
+            .addAction(Notification.Action.Builder(null, getString(R.string.notif_result_dismiss), dismissIntent).build())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setShowWhen(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setPublicVersion(publicVersion)
         if (android.os.Build.VERSION.SDK_INT >= 36) {
-            builder.setShortCriticalText(getString(R.string.notif_progress_short, step))
+            builder.setShortCriticalText(
+                getString(if (success) R.string.notif_result_short_done else R.string.notif_result_short_failed)
+            )
         }
+        LiveUpdates.requestPromotion(builder)
         val notification = builder.build()
         lastNotification = notification
+        resultNotificationShown = true
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
     }
 }

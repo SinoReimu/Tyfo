@@ -445,11 +445,12 @@ class AssistantPanel(private val context: Context, private val host: Host) {
     }
 
     /**
-     * 交给 Agent 之后：解锁状态下打个勾就收起，进度交给顶部浮窗；
-     * 锁屏时悬浮窗会被系统隐藏，面板就留在锁屏上实时显示任务进度，直到用户关掉或任务结束。
+     * 交给 Agent 之后打个勾就收起，进度交给实况窗（锁屏上也能看到）或解锁时的顶部浮窗。
+     * 只有锁屏且系统不支持实况窗时，浮窗又被锁屏挡住，面板才留在锁屏上实时显示任务进度，直到用户关掉或任务结束。
      */
     private fun handedOff(message: String) {
-        if (keyguard?.isKeyguardLocked == true) enterTracking(message) else showDone(message)
+        val trackOnLockScreen = keyguard?.isKeyguardLocked == true && !ai.opencyvis.LiveUpdates.isAvailable(context)
+        if (trackOnLockScreen) enterTracking(message) else showDone(message)
     }
 
     private fun enterTracking(message: String) {
