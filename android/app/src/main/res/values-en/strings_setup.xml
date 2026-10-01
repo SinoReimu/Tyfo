@@ -60,4 +60,17 @@
     <string name="setup_action_done">I\'m done</string>
     <string name="setup_action_stop">Stop</string>
     <string name="setup_open_settings_manual">Please open Settings → System → Developer options → Wireless debugging manually</string>
+
+    <!-- Root (default backend) -->
+    <string name="setup_choose_title">Choose a connection</string>
+    <string name="setup_choose_desc">By default OpenCyvis starts its privileged service through root, with no WiFi or wireless debugging needed.\nYou can also use Shizuku or wireless ADB.</string>
+    <string name="setup_use_root">Use root (recommended)</string>
+    <string name="setup_use_shizuku">Use Shizuku</string>
+    <string name="setup_use_wireless_adb">Use wireless ADB</string>
+    <string name="setup_root_title">Connecting via root</string>
+    <string name="setup_root_connecting">Starting the privileged service…\nIf a superuser prompt appears, allow OpenCyvis.</string>
+    <string name="setup_root_connecting_btn">Connecting…</string>
+    <string name="setup_root_connected">Connected via root</string>
+    <string name="setup_root_unavailable_title">No root access</string>
+    <string name="setup_root_unavailable_desc">Allow OpenCyvis in the Magisk / KernelSU superuser list, then tap Retry.\n\nWithout root you can use Shizuku or wireless ADB (needs WiFi and wireless debugging).</string>
 </resources>

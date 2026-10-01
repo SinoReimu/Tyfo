@@ -70,4 +70,17 @@
     <string name="setup_action_done">我已完成</string>
     <string name="setup_action_stop">停止</string>
     <string name="setup_open_settings_manual">请手动进入：设置 → 系统 → 开发者选项 → 无线调试</string>
+
+    <!-- Root (default backend) -->
+    <string name="setup_choose_title">选择连接方式</string>
+    <string name="setup_choose_desc">默认通过 Root 启动特权服务，不需要 WiFi 和无线调试。\n也可以改用 Shizuku 或无线 ADB。</string>
+    <string name="setup_use_root">使用 Root（推荐）</string>
+    <string name="setup_use_shizuku">使用 Shizuku</string>
+    <string name="setup_use_wireless_adb">改用无线 ADB</string>
+    <string name="setup_root_title">正在通过 Root 连接</string>
+    <string name="setup_root_connecting">正在启动特权服务…\n如果弹出超级用户授权，请允许 OpenCyvis。</string>
+    <string name="setup_root_connecting_btn">连接中…</string>
+    <string name="setup_root_connected">已通过 Root 连接</string>
+    <string name="setup_root_unavailable_title">未获得 Root 权限</string>
+    <string name="setup_root_unavailable_desc">请在 Magisk / KernelSU 的超级用户列表里允许 OpenCyvis，然后点「重试」。\n\n没有 Root 的话可以改用 Shizuku 或无线 ADB（需要 WiFi 和无线调试）。</string>
 </resources>

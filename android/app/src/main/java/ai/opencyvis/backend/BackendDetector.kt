@@ -23,14 +23,7 @@ object BackendDetector {
             return DetectionResult.Ready(SystemBackend())
         }
 
-        // Shizuku is the preferred standard-app backend. A running Shizuku that has
-        // not been authorized yet must lead to the permission UI, not wireless ADB.
         val connectors = buildConnectorList(context)
-        if (ShizukuConnector.status() == ShizukuStatus.PERMISSION_REQUIRED) {
-            Log.i(TAG, "Shizuku is running and needs app permission")
-            return DetectionResult.SetupRequired(connectors)
-        }
-
         for (connector in connectors) {
             if (!connector.isAvailable()) continue
             Log.i(TAG, "Trying ${connector.name}...")
@@ -60,15 +53,28 @@ object BackendDetector {
             }
         }
 
+        // Shizuku is running but not authorized yet: lead to its permission UI rather
+        // than reporting nothing available.
+        if (ShizukuConnector.status() == ShizukuStatus.PERMISSION_REQUIRED) {
+            Log.i(TAG, "Shizuku is running and needs app permission")
+            return DetectionResult.SetupRequired(connectors)
+        }
+
         Log.w(TAG, "No privileged backend available")
         return DetectionResult.NoneAvailable
     }
 
+    /**
+     * Root first (silent once granted in Magisk/KernelSU, and uid 0 can capture secure
+     * windows), then Shizuku. Wireless ADB is only tried after the user picked it in the
+     * setup screen — otherwise a phone without wireless debugging would wait out its
+     * 10s timeout on every launch.
+     */
     private fun buildConnectorList(context: Context): List<ServiceConnector> {
-        return listOf(
-            ShizukuConnector(context),
-            RootConnector(context),
-            DirectConnector(context),
-        )
+        return buildList {
+            add(RootConnector(context))
+            add(ShizukuConnector(context))
+            if (SetupStateDetector.isWirelessAdbChosen(context)) add(DirectConnector(context))
+        }
     }
 }

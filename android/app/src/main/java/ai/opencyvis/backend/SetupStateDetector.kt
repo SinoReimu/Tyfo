@@ -17,6 +17,21 @@ enum class SetupState {
 
 object SetupStateDetector {
 
+    private const val PREFS = "opencyvis_config"
+    private const val KEY_WIRELESS_ADB = "backend_wireless_adb"
+
+    /**
+     * 用户在引导页手动选了「无线 ADB」。默认走 root（其次 Shizuku），只有选了无线 ADB
+     * 才检测 WiFi / 无线调试，启动时也才去尝试 adb-direct。
+     */
+    fun isWirelessAdbChosen(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_WIRELESS_ADB, false)
+
+    fun setWirelessAdbChosen(context: Context, chosen: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_WIRELESS_ADB, chosen).apply()
+    }
+
+    /** 无线 ADB 的前置条件检查，只在用户选了无线 ADB 之后调用。 */
     fun detect(context: Context, isBackendConnected: Boolean): SetupState {
         if (isBackendConnected) return SetupState.ALREADY_CONNECTED
         if (!hasWifi(context)) return SetupState.NEED_WIFI

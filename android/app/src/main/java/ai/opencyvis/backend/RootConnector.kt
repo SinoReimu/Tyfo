@@ -22,7 +22,10 @@ class RootConnector(private val context: Context) : ServiceConnector {
 
         @Volatile private var cachedAvailable: Boolean? = null
 
-        /** Runs `su -c id` and checks it reports uid=0. Cached after the first check. */
+        /**
+         * Runs `su -c id` and checks it reports uid=0. Only a success is cached, so granting
+         * the app in Magisk afterwards takes effect on the next check without a restart.
+         */
         fun checkRootAvailable(): Boolean {
             cachedAvailable?.let { return it }
             val available = try {
@@ -36,7 +39,7 @@ class RootConnector(private val context: Context) : ServiceConnector {
                 Log.i(TAG, "Root not available: ${e.message}")
                 false
             }
-            cachedAvailable = available
+            if (available) cachedAvailable = true
             return available
         }
     }

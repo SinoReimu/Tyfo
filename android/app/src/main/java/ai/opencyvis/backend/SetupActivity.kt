@@ -22,6 +22,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import android.util.Log
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 class SetupActivity : AppCompatActivity() {
@@ -33,8 +34,10 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private enum class SetupState {
-        CHOOSE_METHOD,       // Choose between Shizuku and ADB Direct
-        NEED_WIFI,           // WiFi not connected
+        CHOOSE_METHOD,       // Choose between root, Shizuku and wireless ADB
+        ROOT_CONNECTING,     // Default: start the privileged service via su
+        ROOT_UNAVAILABLE,    // No root grant (and no Shizuku): retry or pick wireless ADB
+        NEED_WIFI,           // WiFi not connected (wireless ADB only)
         SHIZUKU_CHECK,       // Check if Shizuku is installed and running
         SHIZUKU_PERMISSION,  // Request Shizuku permission
         ADB_CHECK_OS,        // Check Android version for wireless debugging
@@ -64,6 +67,7 @@ class SetupActivity : AppCompatActivity() {
     private var resumeAfterCreate = false
     private var pairingPortJob: Job? = null
     private var shizukuConnectJob: Job? = null
+    private var rootJob: Job? = null
     private var requestedBatteryExemption = false
     private var preferWirelessAdb = false
     private var forceMethodChooser = false
@@ -71,6 +75,7 @@ class SetupActivity : AppCompatActivity() {
     private val shizukuBinderReceivedListener = rikka.shizuku.Shizuku.OnBinderReceivedListener {
         if (!forceMethodChooser &&
             !preferWirelessAdb &&
+            currentState != SetupState.ROOT_CONNECTING &&
             currentState != SetupState.SHIZUKU_CHECK &&
             currentState != SetupState.CONNECTING &&
             currentState != SetupState.ADB_PAIR &&
@@ -131,6 +136,7 @@ class SetupActivity : AppCompatActivity() {
         observePairingPort()
 
         forceMethodChooser = intent.getBooleanExtra(EXTRA_FORCE_METHOD_CHOOSER, false)
+        preferWirelessAdb = SetupStateDetector.isWirelessAdbChosen(this)
         if (forceMethodChooser) {
             updateUi(SetupState.CHOOSE_METHOD)
         } else {
@@ -139,16 +145,67 @@ class SetupActivity : AppCompatActivity() {
         resumeAfterCreate = true
     }
 
-    /** Prefer a running Shizuku before evaluating any wireless ADB prerequisites. */
+    /**
+     * 默认先走 root，拿不到再看 Shizuku。无线 ADB 只有用户手动选了才进入，
+     * WiFi / 开发者选项 / 无线调试这些检测也只在那时才做。
+     */
     private fun startPreferredSetupFlow() {
         if (preferWirelessAdb) {
             startAdbSetupFlow()
             return
         }
+        updateUi(SetupState.ROOT_CONNECTING)
+    }
+
+    private fun connectRoot() {
+        if (rootJob?.isActive == true) return
+        rootJob = scope.launch {
+            val connector = RootConnector(this@SetupActivity)
+            // su 可能要等 Magisk / KernelSU 的授权弹窗，放到 IO 线程
+            val available = withContext(Dispatchers.IO) { connector.isAvailable() }
+            val result = if (available) {
+                connector.connect()
+                withTimeoutOrNull(12_000L) {
+                    connector.state.first { it is ConnectionState.Connected || it is ConnectionState.Failed }
+                }
+            } else null
+            if (result is ConnectionState.Connected) {
+                registerConnectedBackend(connector, result.serviceBinder)
+                // root 能用就不需要无线 ADB 兜底了
+                SetupStateDetector.setWirelessAdbChosen(this@SetupActivity, false)
+                // 从首页拉起的话首页会自己提示，这里只给从设置页进来的情况补一句
+                if (callingActivity == null) {
+                    Toast.makeText(this@SetupActivity, R.string.setup_root_connected, Toast.LENGTH_SHORT).show()
+                }
+                setResult(RESULT_BACKEND_READY)
+                finish()
+                return@launch
+            }
+            Log.i("SetupActivity", "Root unavailable (su granted=$available, result=$result)")
+            if (available) connector.disconnect()
+            when (ShizukuConnector.status()) {
+                ShizukuStatus.READY -> updateUi(SetupState.SHIZUKU_CHECK)
+                ShizukuStatus.PERMISSION_REQUIRED -> updateUi(SetupState.SHIZUKU_PERMISSION)
+                ShizukuStatus.UNAVAILABLE -> updateUi(SetupState.ROOT_UNAVAILABLE)
+            }
+        }
+    }
+
+    /** 用户手动选了无线 ADB：记下来，之后才检测 WiFi / 无线调试，启动时也才会尝试 adb-direct。 */
+    private fun chooseWirelessAdb() {
+        forceMethodChooser = false
+        preferWirelessAdb = true
+        SetupStateDetector.setWirelessAdbChosen(this, true)
+        startAdbSetupFlow()
+    }
+
+    private fun chooseShizuku() {
+        forceMethodChooser = false
+        preferWirelessAdb = false
         when (ShizukuConnector.status()) {
             ShizukuStatus.READY -> updateUi(SetupState.SHIZUKU_CHECK)
             ShizukuStatus.PERMISSION_REQUIRED -> updateUi(SetupState.SHIZUKU_PERMISSION)
-            ShizukuStatus.UNAVAILABLE -> startAdbSetupFlow()
+            ShizukuStatus.UNAVAILABLE -> updateUi(SetupState.ROOT_UNAVAILABLE)
         }
     }
 
@@ -158,7 +215,7 @@ class SetupActivity : AppCompatActivity() {
         val startState = when (detected) {
             ai.opencyvis.backend.SetupState.NEED_WIFI -> SetupState.NEED_WIFI
             ai.opencyvis.backend.SetupState.UNSUPPORTED_VERSION -> SetupState.ADB_CHECK_OS
-            ai.opencyvis.backend.SetupState.NEED_DEVELOPER_OPTIONS -> SetupState.CHOOSE_METHOD
+            ai.opencyvis.backend.SetupState.NEED_DEVELOPER_OPTIONS -> SetupState.ADB_ENABLE_DEV
             ai.opencyvis.backend.SetupState.NEED_WIRELESS_DEBUGGING -> SetupState.ADB_ENABLE_WIRELESS
             ai.opencyvis.backend.SetupState.NEED_PAIRING -> {
                 // Wireless debugging is on — try reconnecting with existing keys first
@@ -190,8 +247,14 @@ class SetupActivity : AppCompatActivity() {
 
         if (forceMethodChooser && currentState == SetupState.CHOOSE_METHOD) return
 
-        if (!preferWirelessAdb && ShizukuConnector.status() != ShizukuStatus.UNAVAILABLE) {
-            startPreferredSetupFlow()
+        if (!preferWirelessAdb) {
+            // 从 Magisk / Shizuku 授权回来：重新连。正在连的不打断，也不做任何无线 ADB 检测。
+            when (currentState) {
+                SetupState.ROOT_UNAVAILABLE -> updateUi(SetupState.ROOT_CONNECTING)
+                SetupState.SHIZUKU_PERMISSION ->
+                    if (ShizukuConnector.status() == ShizukuStatus.READY) updateUi(SetupState.SHIZUKU_CHECK)
+                else -> {}
+            }
             return
         }
 
@@ -200,7 +263,7 @@ class SetupActivity : AppCompatActivity() {
         val newState = when (detected) {
             ai.opencyvis.backend.SetupState.NEED_WIFI -> SetupState.NEED_WIFI
             ai.opencyvis.backend.SetupState.UNSUPPORTED_VERSION -> SetupState.ADB_CHECK_OS
-            ai.opencyvis.backend.SetupState.NEED_DEVELOPER_OPTIONS -> SetupState.CHOOSE_METHOD
+            ai.opencyvis.backend.SetupState.NEED_DEVELOPER_OPTIONS -> SetupState.ADB_ENABLE_DEV
             ai.opencyvis.backend.SetupState.NEED_WIRELESS_DEBUGGING -> SetupState.ADB_ENABLE_WIRELESS
             ai.opencyvis.backend.SetupState.NEED_PAIRING -> {
                 tryAutoReconnect()
@@ -238,19 +301,30 @@ class SetupActivity : AppCompatActivity() {
 
         when (state) {
             SetupState.CHOOSE_METHOD -> {
-                val shizukuStatus = ShizukuConnector.status()
-                if (shizukuStatus != ShizukuStatus.UNAVAILABLE) {
-                    // Shizuku detected — offer both options
-                    titleView.text = "Choose Backend"
-                    descView.text = "Shizuku is available. Choose which privilege backend OpenCyvis should use."
-                    actionButton.text = "Use Shizuku"
-                    secondaryButton.text = "Use Wireless ADB"
-                    secondaryButton.visibility = View.VISIBLE
-                } else {
-                    titleView.text = "Choose Backend"
-                    descView.text = "Shizuku is not running. Wireless ADB is the available standard-app backend."
-                    actionButton.text = "Use Wireless ADB"
-                }
+                titleView.text = getString(R.string.setup_choose_title)
+                descView.text = getString(R.string.setup_choose_desc)
+                actionButton.text = getString(R.string.setup_use_root)
+                // Shizuku 在跑就给 Shizuku，否则给无线 ADB（Shizuku 的权限页里还能再选无线 ADB）
+                secondaryButton.text = getString(
+                    if (ShizukuConnector.status() != ShizukuStatus.UNAVAILABLE) R.string.setup_use_shizuku
+                    else R.string.setup_use_wireless_adb
+                )
+                secondaryButton.visibility = View.VISIBLE
+            }
+            SetupState.ROOT_CONNECTING -> {
+                titleView.text = getString(R.string.setup_root_title)
+                descView.text = getString(R.string.setup_root_connecting)
+                progressBar.visibility = View.VISIBLE
+                actionButton.text = getString(R.string.setup_root_connecting_btn)
+                actionButton.isEnabled = false
+                connectRoot()
+            }
+            SetupState.ROOT_UNAVAILABLE -> {
+                titleView.text = getString(R.string.setup_root_unavailable_title)
+                descView.text = getString(R.string.setup_root_unavailable_desc)
+                actionButton.text = getString(R.string.setup_action_retry)
+                secondaryButton.text = getString(R.string.setup_use_wireless_adb)
+                secondaryButton.visibility = View.VISIBLE
             }
             SetupState.NEED_WIFI -> {
                 titleView.text = getString(R.string.setup_need_wifi_title)
@@ -370,19 +444,15 @@ class SetupActivity : AppCompatActivity() {
         when (currentState) {
             SetupState.CHOOSE_METHOD -> {
                 forceMethodChooser = false
-                when (ShizukuConnector.status()) {
-                    ShizukuStatus.READY -> updateUi(SetupState.SHIZUKU_CHECK)
-                    ShizukuStatus.PERMISSION_REQUIRED -> updateUi(SetupState.SHIZUKU_PERMISSION)
-                    ShizukuStatus.UNAVAILABLE -> {
-                        preferWirelessAdb = true
-                        startAdbSetupFlow()
-                    }
-                }
+                preferWirelessAdb = false
+                updateUi(SetupState.ROOT_CONNECTING)
             }
+            SetupState.ROOT_CONNECTING -> {} // wait
+            SetupState.ROOT_UNAVAILABLE -> updateUi(SetupState.ROOT_CONNECTING)
             SetupState.NEED_WIFI -> {
                 // Re-check WiFi
                 if (SetupStateDetector.hasWifi(this)) {
-                    updateUi(SetupState.CHOOSE_METHOD)
+                    startAdbSetupFlow()
                 } else {
                     Toast.makeText(this, getString(R.string.setup_need_wifi_title), Toast.LENGTH_SHORT).show()
                 }
@@ -418,14 +488,10 @@ class SetupActivity : AppCompatActivity() {
     private fun onSecondaryClick() {
         when (currentState) {
             SetupState.CHOOSE_METHOD -> {
-                forceMethodChooser = false
-                preferWirelessAdb = true
-                updateUi(SetupState.ADB_CHECK_OS)
+                if (ShizukuConnector.status() != ShizukuStatus.UNAVAILABLE) chooseShizuku() else chooseWirelessAdb()
             }
-            SetupState.SHIZUKU_PERMISSION -> {
-                preferWirelessAdb = true
-                startAdbSetupFlow()
-            }
+            SetupState.ROOT_UNAVAILABLE -> chooseWirelessAdb()
+            SetupState.SHIZUKU_PERMISSION -> chooseWirelessAdb()
             SetupState.ADB_ENABLE_DEV -> updateUi(SetupState.ADB_ENABLE_WIRELESS)
             SetupState.ADB_ENABLE_WIRELESS -> {
                 // "Enter Code Manually"
@@ -540,8 +606,10 @@ class SetupActivity : AppCompatActivity() {
 
                     if (shizukuRunning) {
                         updateUi(SetupState.SHIZUKU_PERMISSION)
-                    } else {
+                    } else if (preferWirelessAdb) {
                         startAdbSetupFlow()
+                    } else {
+                        updateUi(SetupState.ROOT_UNAVAILABLE)
                     }
                 }
             } catch (e: Exception) {
@@ -742,6 +810,7 @@ class SetupActivity : AppCompatActivity() {
         scope.cancel()
         pairingPortJob?.cancel()
         shizukuConnectJob?.cancel()
+        rootJob?.cancel()
         super.onDestroy()
     }
 }
