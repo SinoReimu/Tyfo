@@ -13,7 +13,9 @@ val localProps = Properties().apply {
 
 android {
     namespace = "ai.opencyvis"
-    compileSdk = 36
+    compileSdk = 37
+    // SDK 37 的平台包按小版本发布（platforms/android-37.0），要写明小版本号 AGP 才找得到
+    compileSdkMinor = 0
 
     // Platform signing: only enable if platform-key/platform.jks exists.
     // Without it, builds use the default debug keystore.
