@@ -173,7 +173,7 @@ dependencies {
     implementation("org.lsposed.libcxx:libcxx:27.0.12077973")
     // ADB key management (X.509 cert generation) + TLS with exportKeyingMaterial
     implementation("org.bouncycastle:bcpkix-jdk18on:1.80")
-    implementation("org.conscrypt:conscrypt-android:2.5.3")
+    implementation("org.conscrypt:conscrypt-android:2.6.3")  // 2.6+: RELRO padded to 16 KB
 
     // Testing
     testImplementation("junit:junit:4.13.2")
