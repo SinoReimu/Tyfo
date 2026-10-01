@@ -22,7 +22,7 @@
     <string name="setup_wireless_notif_enter_title">点击「无线调试」</string>
     <string name="setup_wireless_notif_enter_desc">在开发者选项中，向下滑动找到「无线调试」并点击进入</string>
     <string name="setup_wireless_notif_guide_title">请点击「使用配对码配对设备」</string>
-    <string name="setup_wireless_notif_guide_desc">在无线调试页面中，点击「使用配对码配对设备」，将弹窗中的 %1$d 位配对码输入到 OpenCyvis</string>
+    <string name="setup_wireless_notif_guide_desc">在无线调试页面中，点击「使用配对码配对设备」，将弹窗中的 %1$d 位配对码输入到 Tyfo</string>
 
     <!-- Step 3: Pairing code -->
     <string name="setup_pair_title">第 3 步：输入配对码</string>
@@ -44,7 +44,7 @@
     <!-- Success -->
     <string name="setup_success_title">配对成功</string>
     <string name="setup_success_desc">设备已连接，可以开始使用。</string>
-    <string name="setup_success_notif">配对成功！点击返回 OpenCyvis</string>
+    <string name="setup_success_notif">配对成功！点击返回 Tyfo</string>
     <string name="setup_done_btn">完成</string>
 
     <!-- OEM specific -->
@@ -78,9 +78,9 @@
     <string name="setup_use_shizuku">使用 Shizuku</string>
     <string name="setup_use_wireless_adb">改用无线 ADB</string>
     <string name="setup_root_title">正在通过 Root 连接</string>
-    <string name="setup_root_connecting">正在启动特权服务…\n如果弹出超级用户授权，请允许 OpenCyvis。</string>
+    <string name="setup_root_connecting">正在启动特权服务…\n如果弹出超级用户授权，请允许 Tyfo。</string>
     <string name="setup_root_connecting_btn">连接中…</string>
     <string name="setup_root_connected">已通过 Root 连接</string>
     <string name="setup_root_unavailable_title">未获得 Root 权限</string>
-    <string name="setup_root_unavailable_desc">请在 Magisk / KernelSU 的超级用户列表里允许 OpenCyvis，然后点「重试」。\n\n没有 Root 的话可以改用 Shizuku 或无线 ADB（需要 WiFi 和无线调试）。</string>
+    <string name="setup_root_unavailable_desc">请在 Magisk / KernelSU 的超级用户列表里允许 Tyfo，然后点「重试」。\n\n没有 Root 的话可以改用 Shizuku 或无线 ADB（需要 WiFi 和无线调试）。</string>
 </resources>

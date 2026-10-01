@@ -1,4 +1,4 @@
-"""Assertion types for OpenCyvis E2E test framework."""
+"""Assertion types for Tyfo E2E test framework."""
 
 from __future__ import annotations
 

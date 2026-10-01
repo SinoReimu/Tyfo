@@ -22,7 +22,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "OpenCyvis"
+rootProject.name = "Tyfo"
 include(":app")
 include(":flagsecure-demo")
 project(":flagsecure-demo").projectDir = file("../tests/flagsecure-demo")

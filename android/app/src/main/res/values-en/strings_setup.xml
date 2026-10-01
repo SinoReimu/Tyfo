@@ -19,7 +19,7 @@
     <string name="setup_wireless_notif_enter_title">Tap \"Wireless debugging\"</string>
     <string name="setup_wireless_notif_enter_desc">In Developer Options, scroll down and tap \"Wireless debugging\" to enter</string>
     <string name="setup_wireless_notif_guide_title">Tap \"Pair device with pairing code\"</string>
-    <string name="setup_wireless_notif_guide_desc">In Wireless Debugging settings, tap \"Pair device with pairing code\", then enter the %1$d-digit code in OpenCyvis</string>
+    <string name="setup_wireless_notif_guide_desc">In Wireless Debugging settings, tap \"Pair device with pairing code\", then enter the %1$d-digit code in Tyfo</string>
 
     <string name="setup_pair_title">Step 3: Enter Pairing Code</string>
     <string name="setup_pair_desc">1. Tap \"Open Wireless Debugging\" below\n2. Tap \"Wireless debugging\" to enter its settings\n3. Tap \"Pair device with pairing code\"\n4. Enter the %1$d-digit code shown in the dialog below</string>
@@ -38,7 +38,7 @@
 
     <string name="setup_success_title">Paired successfully</string>
     <string name="setup_success_desc">Device connected. Ready to use.</string>
-    <string name="setup_success_notif">Paired! Tap to return to OpenCyvis</string>
+    <string name="setup_success_notif">Paired! Tap to return to Tyfo</string>
     <string name="setup_done_btn">Done</string>
 
     <string name="setup_miui_sim_warning">Xiaomi devices may require a SIM card and Mi Account login to enable USB debugging security.</string>
@@ -63,14 +63,14 @@
 
     <!-- Root (default backend) -->
     <string name="setup_choose_title">Choose a connection</string>
-    <string name="setup_choose_desc">By default OpenCyvis starts its privileged service through root, with no WiFi or wireless debugging needed.\nYou can also use Shizuku or wireless ADB.</string>
+    <string name="setup_choose_desc">By default Tyfo starts its privileged service through root, with no WiFi or wireless debugging needed.\nYou can also use Shizuku or wireless ADB.</string>
     <string name="setup_use_root">Use root (recommended)</string>
     <string name="setup_use_shizuku">Use Shizuku</string>
     <string name="setup_use_wireless_adb">Use wireless ADB</string>
     <string name="setup_root_title">Connecting via root</string>
-    <string name="setup_root_connecting">Starting the privileged service…\nIf a superuser prompt appears, allow OpenCyvis.</string>
+    <string name="setup_root_connecting">Starting the privileged service…\nIf a superuser prompt appears, allow Tyfo.</string>
     <string name="setup_root_connecting_btn">Connecting…</string>
     <string name="setup_root_connected">Connected via root</string>
     <string name="setup_root_unavailable_title">No root access</string>
-    <string name="setup_root_unavailable_desc">Allow OpenCyvis in the Magisk / KernelSU superuser list, then tap Retry.\n\nWithout root you can use Shizuku or wireless ADB (needs WiFi and wireless debugging).</string>
+    <string name="setup_root_unavailable_desc">Allow Tyfo in the Magisk / KernelSU superuser list, then tap Retry.\n\nWithout root you can use Shizuku or wireless ADB (needs WiFi and wireless debugging).</string>
 </resources>

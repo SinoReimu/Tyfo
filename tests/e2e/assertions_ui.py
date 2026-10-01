@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class DumpsysContains(Assertion):
-    """Assert that `dumpsys opencyvis` output contains a substring."""
+    """Assert that `dumpsys tyfo` output contains a substring."""
 
     def __init__(self, expected: str):
         self.expected = expected
@@ -34,7 +34,7 @@ class DumpsysContains(Assertion):
 
 
 class DumpsysAbsent(Assertion):
-    """Assert that `dumpsys opencyvis` output does NOT contain a substring."""
+    """Assert that `dumpsys tyfo` output does NOT contain a substring."""
 
     def __init__(self, absent: str):
         self.absent = absent
@@ -88,7 +88,7 @@ class ImOutboundContains(Assertion):
             adb_run("shell", "setenforce", "0", serial=config.serial)
         except Exception:
             pass
-        output = adb_run("shell", "dumpsys", "opencyvis", "im", "outbound",
+        output = adb_run("shell", "dumpsys", "tyfo", "im", "outbound",
                          serial=config.serial, timeout=10)
         if self.expected in output:
             return True, f"im outbound contains: {self.expected!r}"
@@ -124,7 +124,7 @@ class UiElement(Assertion):
     def evaluate(self, state: RunState, config: RunConfig) -> tuple[bool, str]:
         from tests.e2e.adb_utils import uiautomator_dump
         xml = uiautomator_dump(config.serial)
-        full_id = f"ai.opencyvis:id/{self.resource_id}"
+        full_id = f"com.shiro.tyfo:id/{self.resource_id}"
         if full_id in xml:
             return True, f"element found: {self.resource_id}"
         return False, f"element not found: {self.resource_id}"

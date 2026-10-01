@@ -33,16 +33,16 @@ class NoAnrDetected(Assertion):
     """Assert that no ANR was triggered during the test run.
 
     Checks logcat for ANR indicators:
-      - "ANR in ai.opencyvis"
+      - "ANR in com.shiro.tyfo"
       - "Input dispatching timed out"
       - ActivityManager ANR traces
     """
 
     def evaluate(self, state: RunState, config: RunConfig) -> tuple[bool, str]:
         anr_patterns = [
-            "ANR in ai.opencyvis",
+            "ANR in com.shiro.tyfo",
             "Input dispatching timed out",
-            "opencyvis.*not responding",
+            "tyfo.*not responding",
         ]
         for line in state.logcat_lines:
             for pattern in anr_patterns:
@@ -56,7 +56,7 @@ class NoAnrDetected(Assertion):
                 serial=config.serial, timeout=10,
             )
             for line in full_logcat.splitlines():
-                if "ANR in ai.opencyvis" in line:
+                if "ANR in com.shiro.tyfo" in line:
                     return False, f"ANR detected in ActivityManager: {line[-200:]}"
         except Exception:
             pass
@@ -70,12 +70,12 @@ class NoAnrDetected(Assertion):
 class AppStillResponsive(Assertion):
     """Assert that the app process is still alive and responsive after the test.
 
-    Runs `dumpsys opencyvis state` and checks that the process didn't crash.
+    Runs `dumpsys tyfo state` and checks that the process didn't crash.
     """
 
     def evaluate(self, state: RunState, config: RunConfig) -> tuple[bool, str]:
         if not adb_utils.is_process_running(config.serial):
-            return False, "ai.opencyvis process is not running (crashed?)"
+            return False, "com.shiro.tyfo process is not running (crashed?)"
 
         try:
             result = adb_utils.get_state(config.serial)

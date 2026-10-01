@@ -1,6 +1,6 @@
 #!/bin/bash
-# Build, install, and configure OpenCyvis on connected device.
-# Reads API config from ~/.config/opencyvis/.env (qwen section, falls back to doubao).
+# Build, install, and configure Tyfo on connected device.
+# Reads API config from ~/.config/tyfo/.env (qwen section, falls back to doubao).
 
 set -e
 
@@ -8,8 +8,8 @@ export JAVA_HOME="${JAVA_HOME:-/opt/homebrew/opt/openjdk@17}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$HOME/.config/opencyvis/.env"
-PACKAGE="ai.opencyvis"
+ENV_FILE="$HOME/.config/tyfo/.env"
+PACKAGE="com.shiro.tyfo"
 adb() {
     command adb -s emulator-5554 "$@"
 }
@@ -62,7 +62,7 @@ params = {
     "model": model,
     "max_steps": max_steps,
 }
-print("opencyvis://config?" + urlencode(params))
+print("tyfo://config?" + urlencode(params))
 PY
 }
 

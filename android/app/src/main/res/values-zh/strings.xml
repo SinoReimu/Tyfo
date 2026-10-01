@@ -122,9 +122,9 @@
     <!-- Supplement info (VD view) -->
 
     <!-- Notifications -->
-    <string name="notif_needs_answer">OpenCyvis 需要回答</string>
-    <string name="notif_open_app">打开 OpenCyvis</string>
-    <string name="notif_channel_ask">OpenCyvis 提问</string>
+    <string name="notif_needs_answer">Tyfo 需要回答</string>
+    <string name="notif_open_app">打开 Tyfo</string>
+    <string name="notif_channel_ask">Tyfo 提问</string>
     <string name="notif_channel_ask_desc">Agent 等待用户回答时的高优先级提醒</string>
     <string name="notif_max_steps_reached">已达到最大步数限制 (%1$d)</string>
 
@@ -133,7 +133,7 @@
     <string name="im_pair_expired">配对码已过期，请重新生成。</string>
     <string name="im_pair_wrong_code">配对码无效。</string>
     <string name="im_pair_locked_out">尝试次数过多，请稍后再试。</string>
-    <string name="im_pair_hint">发送 /pair &lt;配对码&gt; 完成配对。配对码在 OpenCyvis 设置中查看。</string>
+    <string name="im_pair_hint">发送 /pair &lt;配对码&gt; 完成配对。配对码在 Tyfo 设置中查看。</string>
     <string name="im_unpair_success">已解绑。发送 /pair &lt;配对码&gt; 重新配对。</string>
     <string name="im_already_paired">已配对。</string>
     <string name="im_stopped">已停止</string>
@@ -231,7 +231,7 @@
 
     <!-- Overlay permission -->
     <string name="overlay_permission_title">悬浮窗权限</string>
-    <string name="overlay_permission_message">OpenCyvis 可以在任务后台运行时显示浮动指示器，这是可选的。</string>
+    <string name="overlay_permission_message">Tyfo 可以在任务后台运行时显示浮动指示器，这是可选的。</string>
     <string name="overlay_permission_grant">授权</string>
 
     <!-- Geofence setup -->
@@ -274,10 +274,10 @@
     <string name="assist_hint_idle">想让我帮你做什么？</string>
     <string name="assist_hint_busy">说点什么，补充给当前任务</string>
     <string name="assist_hint_answer">直接说出你的回答</string>
-    <string name="assist_hint_typing">输入要交给 OpenCyvis 的任务</string>
+    <string name="assist_hint_typing">输入要交给 Tyfo 的任务</string>
     <string name="assist_no_match">没听清，轻点麦克风再说一次</string>
     <string name="assist_no_mic">没有麦克风权限，可以直接打字</string>
-    <string name="assist_submitting">正在交给 OpenCyvis…</string>
+    <string name="assist_submitting">正在交给 Tyfo…</string>
     <string name="assist_done_started">开始执行了，进度看顶部浮窗</string>
     <string name="assist_done_replaced">已停止旧任务，开始执行新的</string>
     <string name="assist_done_supplemented">已补充给当前任务</string>
@@ -294,10 +294,10 @@
     <string name="assist_cd_keyboard">改成打字</string>
     <string name="assist_cd_mic">说话</string>
     <string name="pref_category_assistant">语音助手</string>
-    <string name="pref_assistant_title">长按电源键唤起 OpenCyvis</string>
-    <string name="pref_assistant_summary_off">未开启：点此前往系统设置，把「默认数字助理应用」选为 OpenCyvis</string>
+    <string name="pref_assistant_title">长按电源键唤起 Tyfo</string>
+    <string name="pref_assistant_summary_off">未开启：点此前往系统设置，把「默认数字助理应用」选为 Tyfo</string>
     <string name="pref_assistant_summary_on">已开启：长按电源键即可语音下达任务</string>
-    <string name="pref_assistant_guide">在「数字助理应用」里选择 OpenCyvis</string>
+    <string name="pref_assistant_guide">在「数字助理应用」里选择 Tyfo</string>
     <string name="assist_tracking_locked">屏幕锁定中，进度会实时显示在这里</string>
     <string name="assist_tracking_done">任务完成：%1$s</string>
     <string name="notif_channel_progress">任务进度</string>
@@ -312,9 +312,9 @@
     <string name="notif_result_short_done">已完成</string>
     <string name="notif_result_short_failed">失败</string>
     <string name="notif_result_dismiss">关闭</string>
-    <string name="notif_progress_public_title">OpenCyvis 正在执行任务</string>
+    <string name="notif_progress_public_title">Tyfo 正在执行任务</string>
     <string name="pref_island_a11y_title">用辅助功能显示任务浮窗</string>
-    <string name="pref_island_a11y_summary_off">未开启：浮窗在锁屏和系统设置页会被隐藏。点此开启 OpenCyvis 无障碍服务</string>
+    <string name="pref_island_a11y_summary_off">未开启：浮窗在锁屏和系统设置页会被隐藏。点此开启 Tyfo 无障碍服务</string>
     <string name="pref_island_a11y_summary_on">已开启：浮窗在锁屏和系统设置页之上也能显示</string>
     <string name="island_collapse">收起</string>
     <string name="vd_status_takeover">接管中</string>

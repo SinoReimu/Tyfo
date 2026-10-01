@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenCyvis</string>
+    <string name="app_name">Tyfo</string>
     <string name="hint_api_key">API Key</string>
     <string name="hint_model">Model (e.g. gpt-5.5, claude-sonnet-4-7)</string>
     <string name="hint_base_url">Base URL</string>
@@ -75,7 +75,7 @@
     <string name="pref_scan_config_qr_summary">Import LLM settings from QR code</string>
     <string name="qr_share_title">Share LLM Config</string>
     <string name="qr_scan_no_result">No QR code detected</string>
-    <string name="qr_scan_invalid">Invalid QR code — not an OpenCyvis config link</string>
+    <string name="qr_scan_invalid">Invalid QR code — not an Tyfo config link</string>
 
     <!-- Provider Profiles -->
     <string name="pref_profile_title">Profile</string>
@@ -153,9 +153,9 @@
     <!-- Supplement info (VD view) -->
 
     <!-- Notifications -->
-    <string name="notif_needs_answer">OpenCyvis needs your answer</string>
-    <string name="notif_open_app">Open OpenCyvis</string>
-    <string name="notif_channel_ask">OpenCyvis Questions</string>
+    <string name="notif_needs_answer">Tyfo needs your answer</string>
+    <string name="notif_open_app">Open Tyfo</string>
+    <string name="notif_channel_ask">Tyfo Questions</string>
     <string name="notif_channel_ask_desc">High-priority alerts when the agent is waiting for your answer</string>
     <string name="notif_max_steps_reached">Max steps reached (%1$d)</string>
 
@@ -276,7 +276,7 @@
 
     <!-- Overlay permission -->
     <string name="overlay_permission_title">Overlay Permission</string>
-    <string name="overlay_permission_message">OpenCyvis can show a floating indicator while tasks run in the background. This is optional.</string>
+    <string name="overlay_permission_message">Tyfo can show a floating indicator while tasks run in the background. This is optional.</string>
     <string name="overlay_permission_grant">Grant</string>
 
     <!-- Geofence setup -->
@@ -319,10 +319,10 @@
     <string name="assist_hint_idle">What should I do for you?</string>
     <string name="assist_hint_busy">Say something to add to the current task</string>
     <string name="assist_hint_answer">Just say your answer</string>
-    <string name="assist_hint_typing">Type a task for OpenCyvis</string>
+    <string name="assist_hint_typing">Type a task for Tyfo</string>
     <string name="assist_no_match">Didn’t catch that. Tap the mic to try again</string>
     <string name="assist_no_mic">Microphone not allowed, you can type instead</string>
-    <string name="assist_submitting">Handing it to OpenCyvis…</string>
+    <string name="assist_submitting">Handing it to Tyfo…</string>
     <string name="assist_done_started">On it. Progress is in the island at the top</string>
     <string name="assist_done_replaced">Stopped the old task and started this one</string>
     <string name="assist_done_supplemented">Added to the current task</string>
@@ -339,10 +339,10 @@
     <string name="assist_cd_keyboard">Type instead</string>
     <string name="assist_cd_mic">Speak</string>
     <string name="pref_category_assistant">Voice assistant</string>
-    <string name="pref_assistant_title">Long-press power for OpenCyvis</string>
-    <string name="pref_assistant_summary_off">Off. Tap, then pick OpenCyvis as the default digital assistant app</string>
-    <string name="pref_assistant_summary_on">On. Long-press the power button to give OpenCyvis a task</string>
-    <string name="pref_assistant_guide">Open “Digital assistant app” and choose OpenCyvis</string>
+    <string name="pref_assistant_title">Long-press power for Tyfo</string>
+    <string name="pref_assistant_summary_off">Off. Tap, then pick Tyfo as the default digital assistant app</string>
+    <string name="pref_assistant_summary_on">On. Long-press the power button to give Tyfo a task</string>
+    <string name="pref_assistant_guide">Open “Digital assistant app” and choose Tyfo</string>
     <string name="assist_tracking_locked">Screen is locked, progress shows here live</string>
     <string name="assist_tracking_done">Done: %1$s</string>
     <string name="notif_channel_progress">Task progress</string>
@@ -357,9 +357,9 @@
     <string name="notif_result_short_done">Done</string>
     <string name="notif_result_short_failed">Failed</string>
     <string name="notif_result_dismiss">Dismiss</string>
-    <string name="notif_progress_public_title">OpenCyvis is running a task</string>
+    <string name="notif_progress_public_title">Tyfo is running a task</string>
     <string name="pref_island_a11y_title">Show the island via accessibility</string>
-    <string name="pref_island_a11y_summary_off">Off: the island is hidden on the lock screen and system Settings pages. Tap to turn on the OpenCyvis accessibility service</string>
+    <string name="pref_island_a11y_summary_off">Off: the island is hidden on the lock screen and system Settings pages. Tap to turn on the Tyfo accessibility service</string>
     <string name="pref_island_a11y_summary_on">On: the island also shows on the lock screen and above system Settings</string>
     <string name="island_collapse">Collapse</string>
     <string name="vd_status_takeover">You\'re in control</string>

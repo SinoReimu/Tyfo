@@ -12,7 +12,7 @@ val localProps = Properties().apply {
 }
 
 android {
-    namespace = "ai.opencyvis"
+    namespace = "com.shiro.tyfo"
     compileSdk = 37
     // SDK 37 的平台包按小版本发布（platforms/android-37.0），要写明小版本号 AGP 才找得到
     compileSdkMinor = 0
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "ai.opencyvis"
+        applicationId = "com.shiro.tyfo"
         minSdk = 30  // Android 11+ for SurfaceControl.screenshot()
         targetSdk = 36
         versionCode = 201
@@ -41,7 +41,7 @@ android {
 
         buildConfigField(
             "String", "PRESET_API_KEY",
-            "\"${localProps.getProperty("opencyvis.presetApiKey", "")}\""
+            "\"${localProps.getProperty("tyfo.presetApiKey", "")}\""
         )
 
         externalNativeBuild {

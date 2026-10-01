@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace = "ai.opencyvis.test.flagsecure"
+    namespace = "com.shiro.tyfo.test.flagsecure"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ai.opencyvis.test.flagsecure"
+        applicationId = "com.shiro.tyfo.test.flagsecure"
         minSdk = 30
         targetSdk = 35
         versionCode = 1

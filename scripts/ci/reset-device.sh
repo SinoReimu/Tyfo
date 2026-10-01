@@ -12,12 +12,12 @@ if ! adb -s "$SERIAL" get-state >/dev/null 2>&1; then
     exit 1
 fi
 
-# Set SELinux permissive (required for dumpsys opencyvis service registration)
+# Set SELinux permissive (required for dumpsys tyfo service registration)
 adb -s "$SERIAL" shell setenforce 0 || true
 
 # Force stop and clear app data
-adb -s "$SERIAL" shell am force-stop ai.opencyvis || true
-adb -s "$SERIAL" shell pm clear ai.opencyvis 2>/dev/null || true
+adb -s "$SERIAL" shell am force-stop com.shiro.tyfo || true
+adb -s "$SERIAL" shell pm clear com.shiro.tyfo 2>/dev/null || true
 
 # Return to home screen
 adb -s "$SERIAL" shell input keyevent HOME || true
@@ -27,6 +27,6 @@ sleep 1
 adb -s "$SERIAL" logcat -c
 
 # Grant overlay permission (system app may already have it)
-adb -s "$SERIAL" shell appops set ai.opencyvis SYSTEM_ALERT_WINDOW allow 2>/dev/null || true
+adb -s "$SERIAL" shell appops set com.shiro.tyfo SYSTEM_ALERT_WINDOW allow 2>/dev/null || true
 
 echo "=== Device reset complete ==="

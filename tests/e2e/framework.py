@@ -140,7 +140,7 @@ class TestRunner:
       2. (If mock_responses) Setup mock LLM server + configure app
       3. Execute pre_steps
       4. Ensure AgentService + OverlayService are running
-      5. Start agent via `dumpsys opencyvis start <instruction>`
+      5. Start agent via `dumpsys tyfo start <instruction>`
       6. Monitor logcat until agent finishes / timeout
       7. Execute post_steps
       8. Take screenshot (used by ScreenshotVerify assertions)
@@ -188,7 +188,7 @@ class TestRunner:
             adb_utils.ensure_services(self.config.serial)
 
             if not adb_utils.is_process_running(self.config.serial):
-                state.finish_reason = "ai.opencyvis process not running — is the APK installed?"
+                state.finish_reason = "com.shiro.tyfo process not running — is the APK installed?"
                 state.elapsed = time.time() - t0
                 return self._make_result(case, state)
 
@@ -263,7 +263,7 @@ class TestRunner:
             # Save current config for restoration after test
             self._saved_config = adb_utils.adb_run(
                 "shell", "cat",
-                f"/data/data/{adb_utils.PACKAGE}/shared_prefs/opencyvis_config.xml",
+                f"/data/data/{adb_utils.PACKAGE}/shared_prefs/tyfo_config.xml",
                 serial=self.config.serial, timeout=5,
             )
 
@@ -276,7 +276,7 @@ class TestRunner:
             # Quote & for device shell since adb shell joins args into a shell command
             mock_url = quote(f"http://localhost:{self.MOCK_PORT}/v1", safe="")
             deeplink = (
-                f"opencyvis://config?provider=openai"
+                f"tyfo://config?provider=openai"
                 f"\\&model=mock-smoke-test"
                 f"\\&base_url={mock_url}"
                 f"\\&api_key=fake-test-key"
@@ -328,7 +328,7 @@ class TestRunner:
                                   serial=self.config.serial)
                 adb_utils.adb_run(
                     "push", tmp,
-                    f"/data/data/{adb_utils.PACKAGE}/shared_prefs/opencyvis_config.xml",
+                    f"/data/data/{adb_utils.PACKAGE}/shared_prefs/tyfo_config.xml",
                     serial=self.config.serial, timeout=5,
                 )
                 import os

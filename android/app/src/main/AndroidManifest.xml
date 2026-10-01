@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="ai.opencyvis">
+    package="com.shiro.tyfo">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -44,7 +44,7 @@
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
-        android:theme="@style/Theme.OpenCyvis">
+        android:theme="@style/Theme.Tyfo">
 
         <activity
             android:name=".ui.ControlPanelActivity"
@@ -52,7 +52,7 @@
             android:configChanges="uiMode"
             android:label="@string/app_name"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar"
+            android:theme="@style/Theme.Tyfo.NoActionBar"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -63,9 +63,9 @@
         <activity
             android:name=".ui.ViewActivity"
             android:exported="false"
-            android:label="OpenCyvis View"
+            android:label="Tyfo View"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar"
+            android:theme="@style/Theme.Tyfo.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
         <activity
@@ -73,7 +73,7 @@
             android:exported="true"
             android:label="Settings"
             android:launchMode="singleTop"
-            android:theme="@style/Theme.OpenCyvis.Settings">
+            android:theme="@style/Theme.Tyfo.Settings">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
 
@@ -82,7 +82,7 @@
 
                 <data
                     android:host="config"
-                    android:scheme="opencyvis" />
+                    android:scheme="tyfo" />
             </intent-filter>
         </activity>
 
@@ -90,19 +90,19 @@
             android:name=".ui.ConversationHistoryActivity"
             android:exported="false"
             android:label="Conversation History"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar" />
+            android:theme="@style/Theme.Tyfo.NoActionBar" />
 
         <activity
             android:name=".ui.ConversationDetailActivity"
             android:exported="false"
             android:label="Conversation Detail"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar" />
+            android:theme="@style/Theme.Tyfo.NoActionBar" />
 
         <activity
             android:name=".ui.MemoryActivity"
             android:exported="false"
             android:label="Memory"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar" />
+            android:theme="@style/Theme.Tyfo.NoActionBar" />
 
         <activity
             android:name=".ui.ScheduleListActivity"
@@ -115,11 +115,11 @@
             android:label="Backend Setup"
             android:configChanges="screenSize|screenLayout|smallestScreenSize"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar" />
+            android:theme="@style/Theme.Tyfo.NoActionBar" />
 
         <activity
             android:name=".backend.PairingDialogActivity"
-            android:theme="@style/Theme.OpenCyvis.Dialog"
+            android:theme="@style/Theme.Tyfo.Dialog"
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:exported="false" />
@@ -129,9 +129,9 @@
             android:exported="true"
             android:configChanges="screenSize|screenLayout|smallestScreenSize"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.OpenCyvis.NoActionBar">
+            android:theme="@style/Theme.Tyfo.NoActionBar">
             <intent-filter>
-                <action android:name="ai.opencyvis.SPLIT_POC" />
+                <action android:name="com.shiro.tyfo.SPLIT_POC" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
@@ -170,7 +170,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Digital assistant (long-press power). The user picks OpenCyvis in the system
+        <!-- Digital assistant (long-press power). The user picks Tyfo in the system
              "Default digital assistant app" setting; nothing here takes the role by itself. -->
         <service
             android:name=".assistant.AssistantService"
@@ -224,7 +224,7 @@
             android:name=".backend.PairingBroadcastReceiver"
             android:exported="true">
             <intent-filter>
-                <action android:name="ai.opencyvis.PAIR" />
+                <action android:name="com.shiro.tyfo.PAIR" />
             </intent-filter>
         </receiver>
 

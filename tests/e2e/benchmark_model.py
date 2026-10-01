@@ -21,7 +21,7 @@ from urllib.parse import quote
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-PACKAGE = "ai.opencyvis"
+PACKAGE = "com.shiro.tyfo"
 # Timeouts increased: Cloudflare tunnel adds ~40s per LLM step
 SCENARIOS = [
     {
@@ -83,12 +83,12 @@ def get_logcat(serial: str | None = None) -> list[str]:
 
 
 def submit_answer(answer: str, serial: str | None = None):
-    adb("shell", "dumpsys", "opencyvis", "inject", "ask_user_response", answer,
+    adb("shell", "dumpsys", "tyfo", "inject", "ask_user_response", answer,
         serial=serial)
 
 
 def stop_agent(serial: str | None = None):
-    adb("shell", "dumpsys", "opencyvis", "debug", "stop", serial=serial)
+    adb("shell", "dumpsys", "tyfo", "debug", "stop", serial=serial)
 
 
 def reset_app(serial: str | None = None):
@@ -102,7 +102,7 @@ def configure_model(model: str, serial: str | None = None):
     """Switch app to use specified Ollama model via deeplink."""
     encoded_url = quote(BASE_URL, safe="")
     deeplink = (
-        f"opencyvis://config?provider=ollama"
+        f"tyfo://config?provider=ollama"
         f"\\&model={model}"
         f"\\&base_url={encoded_url}"
         f"\\&api_key=unused"
@@ -123,7 +123,7 @@ def ensure_services(serial: str | None = None):
 
 
 def start_agent(instruction: str, serial: str | None = None) -> str:
-    return adb("shell", "dumpsys", "opencyvis", "start", instruction,
+    return adb("shell", "dumpsys", "tyfo", "start", instruction,
                serial=serial, timeout=5)
 
 

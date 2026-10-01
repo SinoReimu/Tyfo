@@ -59,13 +59,13 @@ class TestRecentShowsConversation(AgentTestCase):
     # to trigger the homepage (showHomepage) refresh with fresh DB data.
     post_steps = [
         # Stop the agent to return to idle state
-        "adb shell dumpsys opencyvis debug stop",
+        "adb shell dumpsys tyfo debug stop",
         "sleep:2",
         # Force-stop to clear any cached UI state
-        "adb shell am force-stop ai.opencyvis",
+        "adb shell am force-stop com.shiro.tyfo",
         "sleep:1",
         # Relaunch ControlPanelActivity — this calls showHomepage() on idle
-        "adb shell am start -n ai.opencyvis/.ui.ControlPanelActivity",
+        "adb shell am start -n com.shiro.tyfo/.ui.ControlPanelActivity",
         "sleep:3",
     ]
     assertions = [
@@ -105,14 +105,14 @@ class TestRecentEmptyWhenNoConversations(AgentTestCase):
     pre_steps = [
         "adb shell setenforce 0",
         # Nuke conversation history so the recent section is truly empty
-        "adb shell 'run-as ai.opencyvis rm -f databases/opencyvis_db'",
+        "adb shell 'run-as com.shiro.tyfo rm -f databases/tyfo_db'",
     ]
     post_steps = [
-        "adb shell dumpsys opencyvis debug stop",
+        "adb shell dumpsys tyfo debug stop",
         "sleep:2",
-        "adb shell am force-stop ai.opencyvis",
+        "adb shell am force-stop com.shiro.tyfo",
         "sleep:1",
-        "adb shell am start -n ai.opencyvis/.ui.ControlPanelActivity",
+        "adb shell am start -n com.shiro.tyfo/.ui.ControlPanelActivity",
         "sleep:3",
     ]
     assertions = [
@@ -156,14 +156,14 @@ class TestMultipleRecentConversations(AgentTestCase):
     ]
     post_steps = [
         # First conversation done. Now run a second one via dumpsys.
-        "adb shell dumpsys opencyvis start 打开相机",  # "打开相机"
+        "adb shell dumpsys tyfo start 打开相机",  # "打开相机"
         "sleep:10",
         # Stop agent and relaunch to see both in recent
-        "adb shell dumpsys opencyvis debug stop",
+        "adb shell dumpsys tyfo debug stop",
         "sleep:2",
-        "adb shell am force-stop ai.opencyvis",
+        "adb shell am force-stop com.shiro.tyfo",
         "sleep:1",
-        "adb shell am start -n ai.opencyvis/.ui.ControlPanelActivity",
+        "adb shell am start -n com.shiro.tyfo/.ui.ControlPanelActivity",
         "sleep:3",
     ]
     assertions = [

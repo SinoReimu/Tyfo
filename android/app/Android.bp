@@ -29,7 +29,7 @@ java_import {
 }
 
 android_app {
-    name: "OpenCyvis",
+    name: "Tyfo",
     srcs: ["src/main/java/**/*.kt"],
     resource_dirs: ["src/main/res"],
     manifest: "src/main/AndroidManifest.xml",

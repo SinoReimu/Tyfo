@@ -5,7 +5,7 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
 
-    <!-- Simplified OpenCyvis logo: hexagonal C with > chevron -->
+    <!-- Simplified Tyfo logo: hexagonal C with > chevron -->
     <!-- Hexagonal C shape (open on the right) -->
     <path
         android:fillColor="#FFFFFFFF"

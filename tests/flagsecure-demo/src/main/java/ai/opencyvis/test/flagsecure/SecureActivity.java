@@ -1,4 +1,4 @@
-package ai.opencyvis.test.flagsecure;
+package com.shiro.tyfo.test.flagsecure;
 
 import android.app.Activity;
 import android.graphics.Color;

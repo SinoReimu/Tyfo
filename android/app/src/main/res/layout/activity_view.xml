@@ -29,7 +29,7 @@
         android:imeOptions="flagNoExtractUi" />
 
     <!-- Edge light (marquee): follows the agent state -->
-    <ai.opencyvis.ui.fx.EdgeLightView
+    <com.shiro.tyfo.ui.fx.EdgeLightView
         android:id="@+id/glow_border"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
@@ -51,7 +51,7 @@
         android:padding="13dp"
         android:src="@drawable/ic_ui_back" />
 
-    <ai.opencyvis.ui.fx.MorphPanelLayout
+    <com.shiro.tyfo.ui.fx.MorphPanelLayout
         android:id="@+id/control_panel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -61,7 +61,7 @@
         android:clickable="true">
 
         <!-- Collapsed: status pill -->
-        <ai.opencyvis.ui.fx.FadeLinearLayout
+        <com.shiro.tyfo.ui.fx.FadeLinearLayout
             android:id="@+id/fab"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -75,7 +75,7 @@
             android:paddingEnd="16dp"
             android:paddingBottom="6dp">
 
-            <ai.opencyvis.ui.fx.AgentIconView
+            <com.shiro.tyfo.ui.fx.AgentIconView
                 android:id="@+id/fab_icon"
                 android:layout_width="32dp"
                 android:layout_height="32dp" />
@@ -91,10 +91,10 @@
                 android:singleLine="true"
                 android:textSize="13sp"
                 tools:text="Step 3 · Opening Settings" />
-        </ai.opencyvis.ui.fx.FadeLinearLayout>
+        </com.shiro.tyfo.ui.fx.FadeLinearLayout>
 
         <!-- Expanded: control card -->
-        <ai.opencyvis.ui.fx.FadeLinearLayout
+        <com.shiro.tyfo.ui.fx.FadeLinearLayout
             android:id="@+id/bottom_panel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -111,7 +111,7 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <ai.opencyvis.ui.fx.AgentIconView
+                <com.shiro.tyfo.ui.fx.AgentIconView
                     android:id="@+id/panel_icon"
                     android:layout_width="40dp"
                     android:layout_height="40dp" />
@@ -224,7 +224,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <ai.opencyvis.ui.fx.ProgressLineView
+            <com.shiro.tyfo.ui.fx.ProgressLineView
                 android:id="@+id/panel_progress"
                 android:layout_width="match_parent"
                 android:layout_height="3dp"
@@ -273,7 +273,7 @@
                 android:layout_marginTop="16dp"
                 android:orientation="horizontal">
 
-                <ai.opencyvis.ui.fx.IconTextButton
+                <com.shiro.tyfo.ui.fx.IconTextButton
                     android:id="@+id/btn_takeover"
                     android:layout_width="0dp"
                     android:layout_height="40dp"
@@ -286,7 +286,7 @@
                     android:text="@string/vd_btn_take_over"
                     android:textSize="14sp" />
 
-                <ai.opencyvis.ui.fx.IconTextButton
+                <com.shiro.tyfo.ui.fx.IconTextButton
                     android:id="@+id/btn_stop"
                     android:layout_width="0dp"
                     android:layout_height="40dp"
@@ -300,6 +300,6 @@
                     android:text="@string/vd_btn_stop"
                     android:textSize="14sp" />
             </LinearLayout>
-        </ai.opencyvis.ui.fx.FadeLinearLayout>
-    </ai.opencyvis.ui.fx.MorphPanelLayout>
+        </com.shiro.tyfo.ui.fx.FadeLinearLayout>
+    </com.shiro.tyfo.ui.fx.MorphPanelLayout>
 </FrameLayout>

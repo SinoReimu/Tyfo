@@ -1,6 +1,6 @@
-# OpenCyvis - AOSP Integration
+# Tyfo - AOSP Integration
 
-OpenCyvis is a privileged system app. It can be built standalone with Gradle for development, or integrated into an AOSP system image for production.
+Tyfo is a privileged system app. It can be built standalone with Gradle for development, or integrated into an AOSP system image for production.
 
 ## Gradle Build (Development)
 
@@ -20,7 +20,7 @@ To build, sign with platform key, and install to a connected emulator:
 ### 1. Symlink into the AOSP tree
 
 ```bash
-ln -s /path/to/aiphone/android $AOSP_ROOT/packages/apps/OpenCyvis
+ln -s /path/to/aiphone/android $AOSP_ROOT/packages/apps/Tyfo
 ```
 
 ### 2. Add to device makefile
@@ -28,16 +28,16 @@ ln -s /path/to/aiphone/android $AOSP_ROOT/packages/apps/OpenCyvis
 In your device makefile (e.g., `device/<vendor>/<device>/device.mk`):
 
 ```makefile
-$(call inherit-product, packages/apps/OpenCyvis/product.mk)
+$(call inherit-product, packages/apps/Tyfo/product.mk)
 ```
 
 Or manually:
 
 ```makefile
-PRODUCT_PACKAGES += OpenCyvis
+PRODUCT_PACKAGES += Tyfo
 
 PRODUCT_COPY_FILES += \
-    packages/apps/OpenCyvis/privapp-permissions-opencyvis.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-opencyvis.xml
+    packages/apps/Tyfo/privapp-permissions-tyfo.xml:$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-tyfo.xml
 ```
 
 ### 3. Build
@@ -45,7 +45,7 @@ PRODUCT_COPY_FILES += \
 ```bash
 source build/envsetup.sh
 lunch <target>
-make OpenCyvis
+make Tyfo
 ```
 
 ## Platform Key Signing
@@ -84,7 +84,7 @@ dependencies {
 
 ## Required Permissions
 
-OpenCyvis requires the following privileged permissions (defined in `privapp-permissions-opencyvis.xml`):
+Tyfo requires the following privileged permissions (defined in `privapp-permissions-tyfo.xml`):
 
 | Permission | Purpose |
 |---|---|
@@ -93,4 +93,4 @@ OpenCyvis requires the following privileged permissions (defined in `privapp-per
 | `CAPTURE_SECURE_VIDEO_OUTPUT` | Access secure display content |
 | `INTERNAL_SYSTEM_WINDOW` | Display overlays as a system app |
 
-These permissions are only grantable to apps in the `/system/priv-app/` partition, which is why OpenCyvis must be built as a privileged system app.
+These permissions are only grantable to apps in the `/system/priv-app/` partition, which is why Tyfo must be built as a privileged system app.

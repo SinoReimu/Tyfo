@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ANDROID_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PACKAGE="ai.opencyvis"
+PACKAGE="com.shiro.tyfo"
 
 echo "=== Building debug APK ==="
 cd "$ANDROID_DIR"

@@ -5,7 +5,7 @@ import android.content.ComponentName;
 /**
  * Compile-time stub for the hidden framework class.
  *
- * Methods included here are the callbacks OpenCyvis overrides. On device the
+ * Methods included here are the callbacks Tyfo overrides. On device the
  * boot classpath provides the real android.app.TaskStackListener.
  */
 public class TaskStackListener extends ITaskStackListener.Stub {

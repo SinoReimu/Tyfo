@@ -1,11 +1,11 @@
 #!/bin/bash
-# Build AOSP emulator image with OpenCyvis pre-installed as a system app.
+# Build AOSP emulator image with Tyfo pre-installed as a system app.
 #
 # This script does everything from zero:
 #   1. Sets up Docker build environment
 #   2. Syncs AOSP source from TUNA mirror
 #   3. Applies goldfish emulator patches
-#   4. Copies OpenCyvis into the AOSP tree
+#   4. Copies Tyfo into the AOSP tree
 #   5. Builds the emulator system image
 #   6. Exports images and generates a launch script
 #
@@ -122,7 +122,7 @@ mkdir -p "$WORKSPACE"/{src,ccache,out}
 # Step 2: Start Docker container
 # ============================================================
 info "Starting Docker build container..."
-export WORKSPACE OPENCYVIS_SRC="$ANDROID_DIR"
+export WORKSPACE TYFO_SRC="$ANDROID_DIR"
 $COMPOSE up -d --build
 
 # Helper to run commands inside the container
@@ -245,49 +245,49 @@ fi
 "
 
 # ============================================================
-# Step 6: Copy OpenCyvis into AOSP tree
+# Step 6: Copy Tyfo into AOSP tree
 # ============================================================
-info "Copying OpenCyvis app source into AOSP tree..."
+info "Copying Tyfo app source into AOSP tree..."
 
 run_in_docker "
 set -euo pipefail
 cd /work/aosp
 
 # Create the target directory
-mkdir -p packages/apps/OpenCyvis
+mkdir -p packages/apps/Tyfo
 
 # Only copy what the AOSP Soong build needs (no Gradle, no local config)
-cp /work/opencyvis/app/Android.bp packages/apps/OpenCyvis/Android.bp
-cp /work/opencyvis/product.mk packages/apps/OpenCyvis/product.mk
-cp -r /work/opencyvis/privapp-permissions-opencyvis.xml packages/apps/OpenCyvis/
-cp -r /work/opencyvis/app/src packages/apps/OpenCyvis/src
-cp -r /work/opencyvis/app/libs packages/apps/OpenCyvis/libs 2>/dev/null || true
+cp /work/tyfo/app/Android.bp packages/apps/Tyfo/Android.bp
+cp /work/tyfo/product.mk packages/apps/Tyfo/product.mk
+cp -r /work/tyfo/privapp-permissions-tyfo.xml packages/apps/Tyfo/
+cp -r /work/tyfo/app/src packages/apps/Tyfo/src
+cp -r /work/tyfo/app/libs packages/apps/Tyfo/libs 2>/dev/null || true
 
-echo 'OpenCyvis source copied to packages/apps/OpenCyvis/'
-find packages/apps/OpenCyvis/ -maxdepth 2 -type f
+echo 'Tyfo source copied to packages/apps/Tyfo/'
+find packages/apps/Tyfo/ -maxdepth 2 -type f
 "
 
 # ============================================================
-# Step 7: Integrate OpenCyvis into AOSP build
+# Step 7: Integrate Tyfo into AOSP build
 # ============================================================
-info "Integrating OpenCyvis into AOSP build system..."
+info "Integrating Tyfo into AOSP build system..."
 
 run_in_docker "
 set -euo pipefail
 cd /work/aosp
 
-# Add OpenCyvis to the product packages and permissions
+# Add Tyfo to the product packages and permissions
 PRODUCT_MK=build/make/target/product/aosp_product.mk
-MARKER='# OpenCyvis system app'
+MARKER='# Tyfo system app'
 
-if ! grep -q 'OpenCyvis' \"\$PRODUCT_MK\"; then
+if ! grep -q 'Tyfo' \"\$PRODUCT_MK\"; then
   echo '' >> \"\$PRODUCT_MK\"
   echo \"$MARKER\" >> \"\$PRODUCT_MK\"
-  echo 'PRODUCT_PACKAGES += OpenCyvis' >> \"\$PRODUCT_MK\"
-  echo 'PRODUCT_COPY_FILES += packages/apps/OpenCyvis/privapp-permissions-opencyvis.xml:\$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-opencyvis.xml' >> \"\$PRODUCT_MK\"
-  echo 'Added OpenCyvis to PRODUCT_PACKAGES in aosp_product.mk'
+  echo 'PRODUCT_PACKAGES += Tyfo' >> \"\$PRODUCT_MK\"
+  echo 'PRODUCT_COPY_FILES += packages/apps/Tyfo/privapp-permissions-tyfo.xml:\$(TARGET_COPY_OUT_SYSTEM)/etc/permissions/privapp-permissions-tyfo.xml' >> \"\$PRODUCT_MK\"
+  echo 'Added Tyfo to PRODUCT_PACKAGES in aosp_product.mk'
 else
-  echo 'OpenCyvis already in PRODUCT_PACKAGES'
+  echo 'Tyfo already in PRODUCT_PACKAGES'
 fi
 
 # Show what we added
@@ -358,7 +358,7 @@ LAUNCH_SCRIPT="$EXPORT_DIR/launch.sh"
 if [[ "$PLATFORM" == "Darwin" ]]; then
   cat > "$LAUNCH_SCRIPT" << 'LAUNCH_MACOS'
 #!/bin/sh
-# Launch OpenCyvis AOSP emulator on macOS (Apple Silicon)
+# Launch Tyfo AOSP emulator on macOS (Apple Silicon)
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -388,7 +388,7 @@ ro.build.version.sdk=$TARGET_SDK
 ro.product.cpu.abi=arm64-v8a
 EOF
 cat > "$SCRIPT_DIR/boot.prop" << EOF
-ro.boot.qemu.avd_name=opencyvis-emu
+ro.boot.qemu.avd_name=tyfo-emu
 EOF
 
 # Disable gfxstream features that crash on Apple Silicon
@@ -432,7 +432,7 @@ LAUNCH_MACOS
 else
   cat > "$LAUNCH_SCRIPT" << 'LAUNCH_LINUX'
 #!/bin/sh
-# Launch OpenCyvis AOSP emulator on Linux
+# Launch Tyfo AOSP emulator on Linux
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -490,7 +490,7 @@ echo
 echo "To start the emulator:"
 echo "  $LAUNCH_SCRIPT"
 echo
-echo "To deploy OpenCyvis (already in system image):"
+echo "To deploy Tyfo (already in system image):"
 echo "  The app is pre-installed. Just launch the emulator."
 echo
 echo "To update the app after code changes:"

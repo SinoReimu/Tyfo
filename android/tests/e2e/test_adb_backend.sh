@@ -10,9 +10,9 @@
 set -e
 
 SERIAL="${1:-$(adb devices | grep -v "List\|^$" | head -1 | awk '{print $1}')}"
-PKG="ai.opencyvis.standard"
-ACTIVITY="$PKG/ai.opencyvis.ui.ControlPanelActivity"
-SETUP_ACTIVITY="$PKG/ai.opencyvis.backend.SetupActivity"
+PKG="com.shiro.tyfo.standard"
+ACTIVITY="$PKG/com.shiro.tyfo.ui.ControlPanelActivity"
+SETUP_ACTIVITY="$PKG/com.shiro.tyfo.backend.SetupActivity"
 ADB="adb -s $SERIAL"
 PASS=0
 FAIL=0
@@ -24,7 +24,7 @@ fail() { FAIL=$((FAIL+1)); RESULTS+="| $1 | FAIL | $2 |\n"; log "FAIL: $1 - $2";
 
 send_task() {
     $ADB logcat -c
-    $ADB shell "am broadcast -a ai.opencyvis.TEST -p $PKG --es instruction '$1'"
+    $ADB shell "am broadcast -a com.shiro.tyfo.TEST -p $PKG --es instruction '$1'"
     sleep "${2:-40}"
 }
 

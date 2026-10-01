@@ -1,4 +1,4 @@
-# OpenCyvis UI Test Scenarios
+# Tyfo UI Test Scenarios
 #
 # Usage with test-ui agent:
 #   @test-ui run open_settings          — run single scenario
@@ -8,12 +8,12 @@
 # Scenario fields:
 #   category:    smoke (deterministic, hard-gate CI) | llm (soft-gate CI) | nightly (unstable external deps)
 #   name:        unique identifier
-#   instruction: text sent to agent via `dumpsys opencyvis start`
+#   instruction: text sent to agent via `dumpsys tyfo start`
 #   timeout:     max wait time in seconds for agent to complete
 #   max_steps:   (optional) expected max step count
 #   answers:     (optional) responses triggered by logcat patterns
 #     - wait_for: logcat pattern to wait for before acting
-#       answer:   text to send via `dumpsys opencyvis inject ask_user_response`
+#       answer:   text to send via `dumpsys tyfo inject ask_user_response`
 #       delay:    (optional) seconds to wait after pattern matched, default 1
 #     - wait_for: logcat pattern
 #       command:  dumpsys subcommand (e.g. "debug complete_handoff")
@@ -27,8 +27,8 @@
 #     - ui_element:     verify element with this resource-id exists in uiautomator dump
 #     - ui_text:        verify element with this text exists in uiautomator dump
 #     - vd_exists:      verify virtual display is alive (true/false)
-#     - dumpsys_contains: run `dumpsys opencyvis` and verify output contains this string
-#     - dumpsys_absent:   run `dumpsys opencyvis` and verify output does NOT contain this string
+#     - dumpsys_contains: run `dumpsys tyfo` and verify output contains this string
+#     - dumpsys_absent:   run `dumpsys tyfo` and verify output does NOT contain this string
 #
 # Step DSL (pre_steps / post_steps):
 #     tap_ui:<resource_id>     — find element by resource-id, tap center
@@ -244,7 +244,7 @@
   instruction: "打开系统设置"
   timeout: 30
   pre_steps:
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
   verify:
     - logcat: "Task completed"
     - chat_contains: "✅"
@@ -256,7 +256,7 @@
   instruction: "打开系统设置"
   timeout: 30
   pre_steps:
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
   post_steps:
     # Stop agent first so we go back to idle
     - "tap_ui:btn_stop"
@@ -289,14 +289,14 @@
         action_type: "finish"
         summary: "已完成"
   post_steps:
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "adb shell input keyevent HOME"
     - "sleep:1"
-    - "adb shell am start -a android.intent.action.VIEW -d 'opencyvis://config?provider=openai&model=spinnertest-custom-xyz&base_url=https%3A%2F%2Fapi.example.com%2Fv1&api_key=testkey&max_steps=20' -p ai.opencyvis"
+    - "adb shell am start -a android.intent.action.VIEW -d 'tyfo://config?provider=openai&model=spinnertest-custom-xyz&base_url=https%3A%2F%2Fapi.example.com%2Fv1&api_key=testkey&max_steps=20' -p com.shiro.tyfo"
     - "sleep:2"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
-    - "adb shell am start -n ai.opencyvis/.SettingsActivity"
+    - "adb shell am start -n com.shiro.tyfo/.SettingsActivity"
     - "sleep:3"
   verify:
     - logcat: "Task completed"
@@ -352,7 +352,7 @@
         summary: "已完成"
   pre_steps:
     - "adb shell setenforce 0"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
   verify:
     - dumpsys_contains: "service_alive\":true"
@@ -370,10 +370,10 @@
         summary: "已完成"
   pre_steps:
     - "adb shell setenforce 0"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
   post_steps:
-    - "adb shell dumpsys opencyvis debug stop"
+    - "adb shell dumpsys tyfo debug stop"
     - "sleep:2"
   verify:
     - logcat: "Task completed"
@@ -391,7 +391,7 @@
         summary: "已完成"
   pre_steps:
     - "adb shell setenforce 0"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
   verify:
     - logcat: "AgentService created"
@@ -726,7 +726,7 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis debug view"
+    - "adb shell dumpsys tyfo debug view"
     - "sleep:2"
   verify:
     - logcat: "Task completed"
@@ -748,7 +748,7 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis debug stop"
+    - "adb shell dumpsys tyfo debug stop"
     - "sleep:2"
   verify:
     - logcat: "Task completed"
@@ -770,7 +770,7 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis debug repeat_type_text_block"
+    - "adb shell dumpsys tyfo debug repeat_type_text_block"
     - "sleep:1"
   verify:
     - logcat: "Task completed"
@@ -792,7 +792,7 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis debug repeat_tap_block"
+    - "adb shell dumpsys tyfo debug repeat_tap_block"
     - "sleep:1"
   verify:
     - logcat: "Task completed"
@@ -814,7 +814,7 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis debug repeat_tap_allow"
+    - "adb shell dumpsys tyfo debug repeat_tap_allow"
     - "sleep:1"
   verify:
     - logcat: "Task completed"
@@ -867,13 +867,13 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis im fake on"
+    - "adb shell dumpsys tyfo im fake on"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im set-pairing-code telegram 847293"
+    - "adb shell dumpsys tyfo im set-pairing-code telegram 847293"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im inbound telegram owner1 owner1 /pair 847293"
+    - "adb shell dumpsys tyfo im inbound telegram owner1 owner1 /pair 847293"
     - "sleep:2"
-    - "adb shell dumpsys opencyvis im inbound telegram owner1 owner1 打开设置"
+    - "adb shell dumpsys tyfo im inbound telegram owner1 owner1 打开设置"
     - "sleep:10"
   verify:
     - logcat: "Task completed"
@@ -894,11 +894,11 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis im fake on"
+    - "adb shell dumpsys tyfo im fake on"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im set-pairing-code telegram 847293"
+    - "adb shell dumpsys tyfo im set-pairing-code telegram 847293"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im inbound telegram owner1 owner1 /pair 000000"
+    - "adb shell dumpsys tyfo im inbound telegram owner1 owner1 /pair 000000"
     - "sleep:2"
   verify:
     - logcat: "Task completed"
@@ -918,9 +918,9 @@
   pre_steps:
     - "adb shell setenforce 0"
   post_steps:
-    - "adb shell dumpsys opencyvis im fake on"
+    - "adb shell dumpsys tyfo im fake on"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im inbound telegram sender1 chat1 hello"
+    - "adb shell dumpsys tyfo im inbound telegram sender1 chat1 hello"
     - "sleep:2"
   verify:
     - logcat: "Task completed"
@@ -944,16 +944,16 @@
     im_remote_enabled: "true"
   pre_steps:
     - "adb shell setenforce 0"
-    - "adb shell am force-stop ai.opencyvis"
-    - "adb shell 'sed -i \"/telegram_allowed_chat_id/d\" /data/data/ai.opencyvis/shared_prefs/opencyvis_config.xml'"
+    - "adb shell am force-stop com.shiro.tyfo"
+    - "adb shell 'sed -i \"/telegram_allowed_chat_id/d\" /data/data/com.shiro.tyfo/shared_prefs/tyfo_config.xml'"
   post_steps:
-    - "adb shell dumpsys opencyvis im fake on"
+    - "adb shell dumpsys tyfo im fake on"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im set-pairing-code telegram 847293"
+    - "adb shell dumpsys tyfo im set-pairing-code telegram 847293"
     - "sleep:1"
-    - "adb shell dumpsys opencyvis im inbound telegram owner1 owner1 /pair 847293"
+    - "adb shell dumpsys tyfo im inbound telegram owner1 owner1 /pair 847293"
     - "sleep:2"
-    - "adb shell dumpsys opencyvis im inbound telegram owner1 owner1 打开设置"
+    - "adb shell dumpsys tyfo im inbound telegram owner1 owner1 打开设置"
     - "sleep:15"
   verify:
     - logcat: "Task completed"
@@ -977,9 +977,9 @@
     - "adb shell setenforce 0"
   post_steps:
     # Force-stop to get clean idle state, then relaunch
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
-    - "adb shell am start -n ai.opencyvis/.ui.ControlPanelActivity"
+    - "adb shell am start -n com.shiro.tyfo/.ui.ControlPanelActivity"
     - "sleep:3"
   verify:
     - logcat: "Task completed"
@@ -1049,9 +1049,9 @@
     - "sleep:3"
     - "tap_text:Check emails"
     - "sleep:8"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
     - "sleep:1"
-    - "adb shell am start -n ai.opencyvis/.ui.ControlPanelActivity"
+    - "adb shell am start -n com.shiro.tyfo/.ui.ControlPanelActivity"
     - "sleep:3"
   verify:
     - logcat: "Task completed"
@@ -1084,7 +1084,7 @@
         summary: "已打开浏览器查询天气"
   pre_steps:
     - "adb shell setenforce 0"
-    - "adb shell am force-stop ai.opencyvis"
+    - "adb shell am force-stop com.shiro.tyfo"
   verify:
     - logcat: "Action blocked: launcher is the foreground app"
     - logcat: "list_apps result"

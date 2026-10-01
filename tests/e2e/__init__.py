@@ -1,1 +1,1 @@
-"""E2E test framework for OpenCyvis Android agent."""
+"""E2E test framework for Tyfo Android agent."""

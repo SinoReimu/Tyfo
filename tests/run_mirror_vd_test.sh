@@ -6,8 +6,8 @@
 #   ./tests/run_mirror_vd_test.sh -s SERIAL    # specific device
 #
 # Prerequisites:
-#   - Standard flavor APK installed (ai.opencyvis.standard)
-#   - FLAG_SECURE demo APK installed (ai.opencyvis.test.flagsecure)
+#   - Standard flavor APK installed (com.shiro.tyfo.standard)
+#   - FLAG_SECURE demo APK installed (com.shiro.tyfo.test.flagsecure)
 #   - Build both:
 #       cd android && ./gradlew :app:assembleStandardDebug :flagsecure-demo:assembleDebug
 
@@ -21,23 +21,23 @@ fi
 adb() { command adb $SERIAL_FLAG "$@"; }
 
 # ── Resolve APK path ──
-PKG="ai.opencyvis.standard"
+PKG="com.shiro.tyfo.standard"
 APK_PATH=$(adb shell pm path "$PKG" 2>/dev/null | head -1 | sed 's/package://')
 if [[ -z "$APK_PATH" ]]; then
     # Fall back to non-standard package name
-    PKG="ai.opencyvis"
+    PKG="com.shiro.tyfo"
     APK_PATH=$(adb shell pm path "$PKG" 2>/dev/null | head -1 | sed 's/package://')
 fi
 
 if [[ -z "$APK_PATH" ]]; then
-    echo "ERROR: OpenCyvis not installed. Run:"
+    echo "ERROR: Tyfo not installed. Run:"
     echo "  cd android && ./gradlew :app:assembleStandardDebug"
     echo "  adb install app/build/outputs/apk/standard/debug/app-standard-debug.apk"
     exit 1
 fi
 
 # ── Check FLAG_SECURE demo app ──
-DEMO_INSTALLED=$(adb shell pm path ai.opencyvis.test.flagsecure 2>/dev/null || true)
+DEMO_INSTALLED=$(adb shell pm path com.shiro.tyfo.test.flagsecure 2>/dev/null || true)
 if [[ -z "$DEMO_INSTALLED" ]]; then
     echo "WARNING: FLAG_SECURE demo not installed. Tests 5-6 will fail."
     echo "  cd android && ./gradlew :flagsecure-demo:assembleDebug"
@@ -52,7 +52,7 @@ echo ""
 # ── Clear logcat and run ──
 adb logcat -c
 
-adb shell "CLASSPATH=$APK_PATH app_process /system/bin ai.opencyvis.backend.MirrorVdTest" 2>&1 || true
+adb shell "CLASSPATH=$APK_PATH app_process /system/bin com.shiro.tyfo.backend.MirrorVdTest" 2>&1 || true
 
 # ── Parse results from logcat ──
 echo ""

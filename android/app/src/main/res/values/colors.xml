@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#00030F</color>
+    <color name="ic_launcher_background">#252A4A</color>
 
     <!-- Surface / Background colors (light defaults) -->
     <color name="surface">#FFFFFF</color>
