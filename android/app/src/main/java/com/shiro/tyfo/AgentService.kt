@@ -440,7 +440,7 @@ class AgentService : Service() {
 
     private fun ensureAccessibilityServiceEnabled() {
         try {
-            val componentName = "${packageName}/${packageName}.accessibility.VdAccessibilityService"
+            val componentName = accessibilityComponentName()
             val existing = android.provider.Settings.Secure.getString(
                 contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
             ) ?: ""
@@ -454,8 +454,43 @@ class AgentService : Service() {
                 contentResolver, android.provider.Settings.Secure.ACCESSIBILITY_ENABLED, 1
             )
             Log.i(TAG, "Auto-enabled VdAccessibilityService")
+        } catch (e: SecurityException) {
+            // 标准版没有 WRITE_SECURE_SETTINGS：有 root 就用 root 开。界面元素（outline）靠它读，没有它模型只能看图估位置
+            scope.launch(Dispatchers.IO) { enableAccessibilityServiceWithRoot() }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to auto-enable accessibility service (requires system app)", e)
+            Log.w(TAG, "Failed to auto-enable accessibility service", e)
+        }
+    }
+
+    /**
+     * 无障碍服务的组件名。标准版的包名带 .standard 后缀，类却在 com.shiro.tyfo 下，
+     * 不能用包名拼类名（拼出来的类不存在，系统会把它从已启用列表里删掉）。
+     */
+    private fun accessibilityComponentName(): String =
+        android.content.ComponentName(this, VdAccessibilityService::class.java).flattenToString()
+
+    private fun enableAccessibilityServiceWithRoot() {
+        if (!com.shiro.tyfo.backend.RootConnector.checkRootAvailable()) {
+            Log.w(TAG, "Accessibility service is off and there's no root to turn it on")
+            return
+        }
+        val componentName = accessibilityComponentName()
+        val existing = android.provider.Settings.Secure.getString(
+            contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ).orEmpty()
+        if (componentName in existing) return
+        val updated = if (existing.isBlank()) componentName else "$existing:$componentName"
+        try {
+            val process = ProcessBuilder(
+                "su", "-c",
+                "settings put secure enabled_accessibility_services '$updated' && settings put secure accessibility_enabled 1"
+            ).redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            val code = process.waitFor()
+            if (code == 0) Log.i(TAG, "Enabled VdAccessibilityService via root")
+            else Log.w(TAG, "Enabling accessibility via root failed ($code): $output")
+        } catch (e: Exception) {
+            Log.w(TAG, "Enabling accessibility via root failed", e)
         }
     }
 
