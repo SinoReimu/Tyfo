@@ -4,6 +4,7 @@ import com.shiro.tyfo.action.Action
 import com.shiro.tyfo.action.ActionExecutor
 import com.shiro.tyfo.capture.ScreenCapture
 import com.shiro.tyfo.fixtures.FakeLlmClient
+import com.shiro.tyfo.fixtures.buildAskUserResponse
 import com.shiro.tyfo.fixtures.buildFinishResponse
 import com.shiro.tyfo.fixtures.buildOpenAppResponse
 import com.shiro.tyfo.fixtures.buildTapResponse
@@ -198,6 +199,33 @@ class AgentEngineTest {
         eventually { assertTrue(engine.state.value is AgentState.Idle) }
 
         assertTrue("Should not exceed maxSteps", fakeLlm.requestHistory.size <= 4)
+    }
+
+    @Test
+    fun `takeover while asking keeps the question after resume`() = runTest {
+        val fakeLlm = FakeLlmClient()
+        fakeLlm.enqueue(buildAskUserResponse("continue?"))
+        fakeLlm.enqueue(buildFinishResponse("done"))
+        val engine = AgentEngine(
+            llmClient = fakeLlm,
+            actionExecutor = mockk(relaxed = true),
+            maxSteps = 10
+        )
+
+        engine.start("ask first")
+        eventually { assertTrue("state=${engine.state.value}", engine.state.value is AgentState.WaitingForUser) }
+
+        // User takes over and hands control back: the loop is still blocked on the answer
+        engine.pause()
+        assertEquals(AgentState.Paused, engine.state.value)
+        engine.resume()
+        val state = engine.state.value
+        assertTrue("question should be restored, was $state", state is AgentState.WaitingForUser)
+        assertEquals("continue?", (state as AgentState.WaitingForUser).question)
+
+        engine.submitUserResponse("yes")
+        eventually { assertTrue("state=${engine.state.value}", engine.state.value is AgentState.Idle) }
+        assertEquals(2, fakeLlm.requestHistory.size)
     }
 
     // --- Helpers ---

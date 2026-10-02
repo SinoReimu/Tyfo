@@ -81,6 +81,8 @@ class AgentEngine(
 
     @Volatile
     private var paused = false
+    // 等用户回答时被接管：循环挂在回答上，不会再去刷新状态，交还时要把这个提问原样恢复
+    private var askBeforePause: AgentState.WaitingForUser? = null
 
     private var consecutiveBlackFrames = 0
     private var lastNonBlackStep = 0
@@ -139,6 +141,7 @@ class AgentEngine(
         // 结果会一直停在 Paused，光效熄灭、虚拟屏也因为“任务还在”而不回收
         if (!isLoopActive) return
         paused = true
+        askBeforePause = _state.value as? AgentState.WaitingForUser
         _state.value = AgentState.Paused
     }
 
@@ -147,7 +150,9 @@ class AgentEngine(
      */
     fun resume() {
         paused = false
-        // State will be updated in the loop
+        // 平时由循环的下一步刷新状态；等回答时循环不会动，直接恢复成等回答，回答框才会回来
+        askBeforePause?.let { if (_state.value is AgentState.Paused) _state.value = it }
+        askBeforePause = null
     }
 
     /**
@@ -486,11 +491,12 @@ class AgentEngine(
                     val question = resultData["question"] as? String ?: thought
                     val totalMsAsk = System.currentTimeMillis() - stepStartTime
                     Log.i(TAG, "WaitingForUser(question=$question, step=$step)")
+                    // 先备好接收回答的位置再公布“等回答”，否则界面一出现就回答会落空
+                    val deferred = CompletableDeferred<String?>()
+                    userResponseDeferred = deferred
                     _state.value = AgentState.WaitingForUser(question, step)
                     _stepResults.emit(StepResult(step, "ask_user", thought, true, "Asking: $question", totalMsAsk, false))
 
-                    val deferred = CompletableDeferred<String?>()
-                    userResponseDeferred = deferred
                     val userAnswer = deferred.await()
                     userResponseDeferred = null
 
