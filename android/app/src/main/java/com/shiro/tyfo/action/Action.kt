@@ -48,9 +48,7 @@ sealed class Action(val typeName: String, open val thought: String) {
     ) : Action("wait", thought)
 
     data class Finish(
-        override val thought: String = "",
-        val suggestedRoutineName: String? = null,
-        val suggestedRoutineIcon: String? = null
+        override val thought: String = ""
     ) : Action("finish", thought)
 
     data class Fail(
@@ -84,19 +82,6 @@ sealed class Action(val typeName: String, open val thought: String) {
         val keyword: String = "",
         override val thought: String = ""
     ) : Action("list_apps", thought)
-
-    data class SaveRoutine(
-        val routineName: String,
-        val routineIcon: String,
-        val routineInstruction: String?,
-        val scheduleType: String?,
-        val scheduleTime: String?,
-        val scheduleRepeat: String?,
-        val scheduleInterval: Int?,
-        val scheduleLocation: String?,
-        val scheduleOnEnter: Boolean?,
-        override val thought: String = ""
-    ) : Action("save_routine", thought)
 
     companion object {
         const val SWIPE_DEFAULT_MS = 300L
@@ -168,11 +153,7 @@ sealed class Action(val typeName: String, open val thought: String) {
                     thought = thought
                 )
                 "wait" -> Wait(thought = thought)
-                "finish" -> Finish(
-                    thought = thought,
-                    suggestedRoutineName = map["suggested_routine_name"] as? String,
-                    suggestedRoutineIcon = map["suggested_routine_icon"] as? String
-                )
+                "finish" -> Finish(thought = thought)
                 "fail" -> Fail(
                     reason = (map["reason"] as? String) ?: "unknown reason",
                     thought = thought
@@ -197,18 +178,6 @@ sealed class Action(val typeName: String, open val thought: String) {
                 )
                 "list_apps" -> ListApps(
                     keyword = (map["keyword"] as? String) ?: "",
-                    thought = thought
-                )
-                "save_routine" -> SaveRoutine(
-                    routineName = (map["routine_name"] as? String) ?: "",
-                    routineIcon = (map["routine_icon"] as? String) ?: "⚡",
-                    routineInstruction = map["routine_instruction"] as? String,
-                    scheduleType = map["schedule_type"] as? String,
-                    scheduleTime = map["schedule_time"] as? String,
-                    scheduleRepeat = map["schedule_repeat"] as? String,
-                    scheduleInterval = (map["schedule_interval"] as? Number)?.toInt(),
-                    scheduleLocation = map["schedule_location"] as? String,
-                    scheduleOnEnter = map["schedule_on_enter"] as? Boolean,
                     thought = thought
                 )
                 else -> Fail(reason = "Unknown action type: $actionType", thought = thought)

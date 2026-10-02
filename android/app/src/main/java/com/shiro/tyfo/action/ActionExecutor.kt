@@ -141,10 +141,6 @@ class ActionExecutor(
                         true to "Installed apps$kw (${apps.size}): ${apps.joinToString(", ")}"
                     }
                 }
-
-                is Action.SaveRoutine -> {
-                    true to "Routine saved: ${action.routineName}"
-                }
             }
         } catch (e: Exception) {
             false to "Error: ${e.message}"

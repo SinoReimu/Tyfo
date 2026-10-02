@@ -2,8 +2,10 @@ package com.shiro.tyfo.db
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatDao {
@@ -13,14 +15,29 @@ interface ChatDao {
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC LIMIT :limit")
     fun getRecentConversations(limit: Int): List<ConversationEntity>
 
-    @Query("SELECT * FROM chat_messages WHERE conversationId = :convId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
+    fun observeConversations(): Flow<List<ConversationEntity>>
+
+    @Query("SELECT * FROM conversations WHERE id = :convId")
+    fun getConversation(convId: Long): ConversationEntity?
+
+    @Query("SELECT * FROM chat_messages WHERE conversationId = :convId ORDER BY timestamp ASC, id ASC")
     fun getMessages(convId: Long): List<ChatMessageEntity>
+
+    @Query("SELECT * FROM chat_messages WHERE conversationId = :convId ORDER BY timestamp ASC, id ASC")
+    fun observeMessages(convId: Long): Flow<List<ChatMessageEntity>>
 
     @Query("SELECT COUNT(*) FROM chat_messages WHERE conversationId = :convId AND type = 'AGENT_STATUS'")
     fun getStepCount(convId: Long): Int
 
     @Insert
     fun insertConversation(conv: ConversationEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun upsertSessionHistory(history: SessionHistoryEntity)
+
+    @Query("SELECT messages FROM session_history WHERE conversationId = :convId")
+    fun getSessionHistory(convId: Long): String?
 
     @Insert
     fun insertMessage(msg: ChatMessageEntity)

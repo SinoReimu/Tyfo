@@ -1,25 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The step in progress: running icon + shimmering thought. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:paddingVertical="4dp"
-    android:orientation="horizontal">
+    android:orientation="horizontal"
+    android:paddingTop="8dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="6dp">
 
-    <ProgressBar
-        android:id="@+id/cycle_spinner"
-        style="?android:attr/progressBarStyleSmall"
-        android:layout_width="16dp"
-        android:layout_height="16dp"
-        android:layout_gravity="center_vertical"
-        android:indeterminateTint="@color/color_progress_green" />
+    <com.shiro.tyfo.ui.fx.AgentIconView
+        android:id="@+id/icon"
+        android:layout_width="28dp"
+        android:layout_height="28dp" />
 
-    <com.shiro.tyfo.ui.TypewriterTextView
+    <com.shiro.tyfo.ui.fx.ShimmerTextView
         android:id="@+id/cycle_text"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_gravity="center_vertical"
-        android:layout_marginStart="8dp"
-        android:textColor="@color/text_cycle"
-        android:textSize="13sp"
-        android:fontFamily="sans-serif" />
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:lineSpacingMultiplier="1.3"
+        android:textSize="14.5sp"
+        tools:text="Opening Settings to find the display page" />
 </LinearLayout>

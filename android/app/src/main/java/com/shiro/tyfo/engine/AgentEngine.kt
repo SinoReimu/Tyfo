@@ -44,11 +44,11 @@ class AgentEngine(
     private val shouldForwardScreenshot: (() -> Boolean)? = null,
     private val blacklistedPackages: Set<String> = emptySet(),
     private val isScreenInteractive: (() -> Boolean)? = null,
-    private val onSaveRoutine: ((
-        name: String, icon: String, instruction: String,
-        scheduleType: String?, scheduleTime: String?, scheduleRepeat: String?,
-        scheduleInterval: Int?, scheduleLocation: String?, scheduleOnEnter: Boolean?
-    ) -> Unit)? = null,
+    /**
+     * 这段会话到目前为止发给模型的纯文字记录（见 [SessionHistory.snapshot]）：任务结束时、
+     * 停下来等用户回答 / 接管时各给一次，用来存库，下次继续这段会话时接上。
+     */
+    private val onTranscript: ((List<Map<String, String>>) -> Unit)? = null,
 ) {
 
     companion object {
@@ -121,15 +121,23 @@ class AgentEngine(
 
     /**
      * Start the agent with the given instruction.
+     *
+     * 继续一段历史会话时：[history] 是之前几轮发给模型的消息（[SessionHistory.forContinuation]），
+     * 接在系统提示词后面，模型能看到之前每一步；[conversationContext] 是整段会话的摘要
+     * （[ConversationContext]），附在系统提示词里，历史太长被截掉的早期几轮也不会丢。
      */
-    fun start(instruction: String) {
+    fun start(
+        instruction: String,
+        conversationContext: String? = null,
+        history: List<Map<String, Any>> = emptyList(),
+    ) {
         if (agentJob?.isActive == true) {
             Log.w(TAG, "Agent already running")
             return
         }
         paused = false
         agentJob = scope.launch {
-            runAgentLoop(instruction)
+            runAgentLoop(instruction, conversationContext, history)
         }
     }
 
@@ -200,13 +208,23 @@ class AgentEngine(
     /**
      * Main observe-think-act loop. Ported from cli_demo.py run_instruction().
      */
-    private suspend fun runAgentLoop(instruction: String) {
+    private suspend fun runAgentLoop(
+        instruction: String,
+        conversationContext: String?,
+        history: List<Map<String, Any>>,
+    ) {
         consecutiveBlackFrames = 0
         lastNonBlackStep = 0
 
+        val systemPrompt = if (conversationContext.isNullOrBlank()) {
+            SYSTEM_PROMPT
+        } else {
+            SYSTEM_PROMPT + LlmPrompts.agentFeedback("conversation_context_header") + conversationContext
+        }
         val messages = mutableListOf<Map<String, Any>>(
-            mapOf("role" to "system", "content" to SYSTEM_PROMPT)
+            mapOf("role" to "system", "content" to systemPrompt)
         )
+        messages.addAll(history)
         val notes = mutableMapOf<String, String>()
         var pendingUserAnswer: String? = null
         var pendingActionFeedback: String? = null
@@ -243,6 +261,7 @@ class AgentEngine(
                             StepResult(step, "blacklist_handoff", "Protected app detected",
                                 true, reason, 0, false)
                         )
+                        saveTranscript(messages)
                         val deferred = CompletableDeferred<String?>()
                         userHandoffDeferred = deferred
                         val handoffSource = deferred.await()
@@ -334,6 +353,8 @@ class AgentEngine(
                         StepResult(step, "flag_secure_handoff", "Privacy-protected screen detected",
                             true, reason, System.currentTimeMillis() - stepStartTime, false)
                     )
+
+                    saveTranscript(messages)
 
                     val deferred = CompletableDeferred<String?>()
                     userHandoffDeferred = deferred
@@ -470,13 +491,9 @@ class AgentEngine(
                     val totalMs = System.currentTimeMillis() - stepStartTime
                     Log.i(TAG, "Step $step TIMING: capture=${captureMs}ms encode=${encodeMs}ms llm=${llmMs}ms action=0ms total=${totalMs}ms [$actionType]")
                     Log.i(TAG, "Task completed at step $step [$actionType]: ${detail.take(100)}")
-                    val sugName = resultData["suggested_routine_name"] as? String
-                    val sugIcon = resultData["suggested_routine_icon"] as? String
                     _stepResults.emit(
                         StepResult(step, actionType, thought, actionType == "finish",
-                            detail, totalMs, true, debugInfo,
-                            suggestedRoutineName = sugName,
-                            suggestedRoutineIcon = sugIcon)
+                            detail, totalMs, true, debugInfo)
                     )
                     _state.value = if (actionType == "finish") {
                         AgentState.Idle(resultMessage = thought)
@@ -497,6 +514,7 @@ class AgentEngine(
                     _state.value = AgentState.WaitingForUser(question, step)
                     _stepResults.emit(StepResult(step, "ask_user", thought, true, "Asking: $question", totalMsAsk, false))
 
+                    saveTranscript(messages)
                     val userAnswer = deferred.await()
                     userResponseDeferred = null
 
@@ -531,6 +549,8 @@ class AgentEngine(
                             debugInfo
                         )
                     )
+
+                    saveTranscript(messages)
 
                     val deferred = CompletableDeferred<String?>()
                     userHandoffDeferred = deferred
@@ -599,41 +619,6 @@ class AgentEngine(
                     )
                     delay(200)
                     continue
-                }
-
-                if (actionType == "save_routine") {
-                    val routineName = (resultData["routine_name"] as? String) ?: ""
-                    val routineIcon = (resultData["routine_icon"] as? String) ?: "⚡"
-                    val routineInstruction = (resultData["routine_instruction"] as? String) ?: instruction
-                    val scheduleType = resultData["schedule_type"] as? String
-                    val scheduleTime = resultData["schedule_time"] as? String
-                    val scheduleRepeat = resultData["schedule_repeat"] as? String
-                    val scheduleInterval = (resultData["schedule_interval"] as? Number)?.toInt()
-                    val scheduleLocation = resultData["schedule_location"] as? String
-                    val scheduleOnEnter = resultData["schedule_on_enter"] as? Boolean
-
-                    onSaveRoutine?.invoke(
-                        routineName, routineIcon, routineInstruction,
-                        scheduleType, scheduleTime, scheduleRepeat,
-                        scheduleInterval, scheduleLocation, scheduleOnEnter
-                    )
-
-                    val totalMs = System.currentTimeMillis() - stepStartTime
-                    val scheduleDesc = when (scheduleType) {
-                        "time" -> "@ $scheduleTime ${scheduleRepeat ?: "daily"}"
-                        "interval" -> "every ${scheduleInterval}min"
-                        "geofence" -> "${if (scheduleOnEnter != false) "arrive" else "leave"} $scheduleLocation"
-                        else -> ""
-                    }
-                    val desc = if (scheduleDesc.isNotEmpty()) "$routineName ($scheduleDesc)" else routineName
-                    Log.i(TAG, "Step $step: save_routine: $desc")
-                    _stepResults.emit(
-                        StepResult(step, actionType, thought, true,
-                            "Routine created: $desc", totalMs, true, debugInfo)
-                    )
-
-                    _state.value = AgentState.Idle(resultMessage = "Routine created: $desc")
-                    return
                 }
 
                 // === ACT ===
@@ -729,7 +714,22 @@ class AgentEngine(
             _state.value = AgentState.Idle()
         } catch (e: Exception) {
             Log.e(TAG, "Agent loop error", e)
-            _state.value = AgentState.Error(e.message ?: "Unknown error")
+            val message = e.message ?: "Unknown error"
+            _state.value = AgentState.Error(message)
+            // 其他失败路径都会发一条 completed 的结果，这里也补上，聊天记录里才有这次的结局
+            _stepResults.tryEmit(StepResult(0, "error", "", false, message, 0, true))
+        } finally {
+            // 完成、失败、出错、被停止都会走到这里
+            saveTranscript(messages)
+        }
+    }
+
+    private fun saveTranscript(messages: List<Map<String, Any>>) {
+        val callback = onTranscript ?: return
+        try {
+            callback(SessionHistory.snapshot(messages))
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to snapshot transcript", e)
         }
     }
 

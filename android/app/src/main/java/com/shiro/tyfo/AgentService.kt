@@ -27,7 +27,6 @@ import com.shiro.tyfo.backend.SetupStateDetector
 import com.shiro.tyfo.backend.SystemBackend
 import com.shiro.tyfo.capture.ScreenCapture
 import com.shiro.tyfo.config.ConfigRepository
-import com.shiro.tyfo.db.AppDatabase
 import com.shiro.tyfo.db.ChatHistoryRepository
 import com.shiro.tyfo.db.GlobalMemoryRepository
 import com.shiro.tyfo.backend.DisplayOps
@@ -38,6 +37,8 @@ import com.shiro.tyfo.display.VirtualDisplayManager
 import com.shiro.tyfo.engine.ActionRepeatGuard
 import com.shiro.tyfo.engine.AgentEngine
 import com.shiro.tyfo.engine.AgentState
+import com.shiro.tyfo.engine.ConversationContext
+import com.shiro.tyfo.engine.SessionHistory
 import com.shiro.tyfo.engine.HandoffUiState
 import com.shiro.tyfo.engine.HandoffVisualDetector
 import com.shiro.tyfo.engine.ScreenFingerprint
@@ -48,7 +49,6 @@ import com.shiro.tyfo.llm.LLMClient
 import com.shiro.tyfo.llm.LLMClientInterface
 import com.shiro.tyfo.llm.OllamaClient
 import com.shiro.tyfo.overlay.OverlayStatePolicy
-import com.shiro.tyfo.schedule.ScheduleManager
 import com.shiro.tyfo.ui.MessageType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -95,11 +95,20 @@ class AgentService : Service() {
         private const val VD_IDLE_RELEASE_MS = 3 * 60_000L
         const val EXTRA_FOCUS_ASK = "focus_ask_user"
         const val EXTRA_SHOW_HANDOFF = "show_handoff"
+        /** 停下来等用户的几种步骤（见 AgentEngine）。 */
+        private val WAITING_ACTIONS = setOf("ask_user", "handoff_user", "blacklist_handoff", "flag_secure_handoff")
     }
 
     // ── Display state management ────────────────────────────────────────
 
     enum class DisplayState { CHAT, VIEW, TAKEOVER }
+
+    /** 启动任务时从会话记录里准备好的东西。 */
+    private class TaskStart(
+        val conversationId: Long,
+        val summary: String?,
+        val history: List<Map<String, Any>>,
+    )
 
     /** [startAgent] 的受理结果。 */
     enum class StartResult { STARTED, BUSY }
@@ -150,6 +159,16 @@ class AgentService : Service() {
     val isTaskActive: Boolean
         get() = taskStarting || engine?.isLoopActive == true
     private var virtualDisplayManager: VirtualDisplayManager? = null
+        set(value) {
+            field = value
+            _virtualDisplayAlive.value = value != null
+        }
+    private val _virtualDisplayAlive = MutableStateFlow(false)
+    /** 虚拟屏还在（任务结束后会留一阵供回看 / 接着做，闲置回收后变 false）。 */
+    val virtualDisplayAlive: StateFlow<Boolean> = _virtualDisplayAlive.asStateFlow()
+    // 会话记录按顺序一条条写，后存的快照不会被先存的覆盖
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val historyWriter = Dispatchers.IO.limitedParallelism(1)
     private var taskDisplayGuard: TaskDisplayGuard? = null
     @Volatile private var occupancyController: AppOccupancyController? = null
     private var lastOccupiedToast: Pair<String, Long>? = null
@@ -205,7 +224,13 @@ class AgentService : Service() {
     /** 进度通知的已执行时长从这里算。 */
     private var taskStartedAt = 0L
     /** 任务结束后的结果实况窗还挂着：别让后续的状态文案把它顶掉，用户关掉或开始新任务时清除。 */
+    @Volatile
     private var resultNotificationShown = false
+    /**
+     * 进度观察和完成处理跑在 Dispatchers.Default 的不同线程上：任务结束那一刻，最后一条 Running（带总结的
+     * thought）可能比结果卡片晚发出去，把“已完成”顶回执行中的进度卡。两种通知都在这把锁里发，结果已挂上就不再发进度。
+     */
+    private val progressNotificationLock = Any()
     /** 当前是否处于前台服务状态（挂着前台通知）。 */
     private var inForeground = false
     private var lastNotification: Notification? = null
@@ -292,19 +317,6 @@ class AgentService : Service() {
             return
         }
 
-        if (intent?.action == "com.shiro.tyfo.START_SCHEDULED") {
-            val instruction = intent.getStringExtra("instruction") ?: return
-            Log.i(TAG, "Scheduled task triggered: $instruction")
-            if (startAgent(instruction) == StartResult.BUSY) {
-                // 不打断用户正在跑的任务，这一次定时触发直接跳过
-                postCompletionNotification(
-                    getString(R.string.task_skipped_title),
-                    getString(R.string.task_skipped_busy, instruction)
-                )
-            }
-            return
-        }
-
         // Support starting agent via intent extra (e.g. from adb)
         val instruction = intent?.getStringExtra("instruction")
         if (!instruction.isNullOrBlank()) {
@@ -315,7 +327,7 @@ class AgentService : Service() {
 
     /**
      * 只有任务进行中、或任务结束后的结果实况窗还挂着时才做前台服务，空闲时不挂常驻的“待命”通知。
-     * 远程 IM 有自己的前台服务，定时任务由闹钟带着任务拉起，都不靠这里常驻。
+     * 远程 IM 有自己的前台服务，不靠这里常驻。
      */
     private fun enterForeground(notification: Notification? = null) {
         try {
@@ -453,8 +465,15 @@ class AgentService : Service() {
      * 受理一个新任务。同一时间只跑一个任务：已有任务没结束时返回 [StartResult.BUSY]，
      * 除非 [replaceRunning]（先停掉旧任务，虚拟屏留给新任务复用）。须在主线程调用。
      * 受理后如果没能跑起来，会发 [TaskEvent.StartFailed]。
+     *
+     * [continueConversationId] 不为空时接着那段历史对话往下做：新指令记在同一个会话里，
+     * 之前几轮的记录整理成上下文交给模型（见 [ConversationContext]）。
      */
-    fun startAgent(instruction: String, replaceRunning: Boolean = false): StartResult {
+    fun startAgent(
+        instruction: String,
+        replaceRunning: Boolean = false,
+        continueConversationId: Long? = null,
+    ): StartResult {
         if (isTaskActive) {
             if (!replaceRunning) {
                 Log.i(TAG, "startAgent refused, task still active: ${currentInstruction.take(40)}")
@@ -526,12 +545,27 @@ class AgentService : Service() {
             val displayId = vdm.displayId
             val displaySize = Point(vdm.width, vdm.height)
 
-            // 会话记录先落库再启动引擎，这样第一步的结果就有地方写
-            val convId = withContext(NonCancellable) {
-                historyRepo.startConversation(instruction).also {
-                    historyRepo.addMessage(it, MessageType.USER_INPUT, instruction)
+            // 会话记录先落库再启动引擎，这样第一步的结果就有地方写。
+            // 接着历史对话做时，先读出之前几轮（不含这次的指令）再把新指令追加进去：
+            // 之前发给模型的完整消息接在新任务前面，整段会话的摘要放进系统提示词
+            val start = withContext(NonCancellable) {
+                val previous = continueConversationId?.let { historyRepo.getConversation(it) }
+                if (previous != null) {
+                    val summary = ConversationContext.build(historyRepo.getMessages(previous.id))
+                    val history = historyRepo.getSessionHistory(previous.id)
+                        ?.let { SessionHistory.forContinuation(SessionHistory.decode(it)) }
+                        .orEmpty()
+                    historyRepo.continueConversation(previous.id, instruction)
+                    Log.i(TAG, "Continuing conversation ${previous.id}: ${history.size} messages restored, summary ${summary?.length ?: 0} chars")
+                    TaskStart(previous.id, summary, history)
+                } else {
+                    val id = historyRepo.startConversation(instruction).also {
+                        historyRepo.addMessage(it, MessageType.USER_INPUT, instruction)
+                    }
+                    TaskStart(id, null, emptyList())
                 }
             }
+            val convId = start.conversationId
             if (!isActive) {
                 // 准备期间被停止或被新任务替换
                 llmClient.shutdown()
@@ -566,48 +600,19 @@ class AgentService : Service() {
                 shouldForwardScreenshot = { config.imSendStepScreenshots },
                 blacklistedPackages = config.blacklistedPackages,
                 isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive },
-                onSaveRoutine = { name, icon, instr, schedType, schedTime, schedRepeat,
-                                  schedInterval, schedLocation, schedOnEnter ->
-                    scope.launch(Dispatchers.IO) {
-                        val dao = AppDatabase.getInstance(this@AgentService).routineDao()
-                        val routine = com.shiro.tyfo.db.RoutineEntity(
-                            name = name,
-                            icon = icon,
-                            instruction = instr,
-                            description = null,
-                            category = "custom",
-                            isPinned = false,
-                            useCount = 0,
-                            lastUsedAt = null,
-                            createdAt = System.currentTimeMillis(),
-                            sortOrder = 100,
-                            scheduleEnabled = schedType != null,
-                            triggerType = schedType,
-                            scheduleHour = schedTime?.split(":")?.getOrNull(0)?.toIntOrNull(),
-                            scheduleMinute = schedTime?.split(":")?.getOrNull(1)?.toIntOrNull(),
-                            scheduleRepeatDays = when (schedRepeat) {
-                                "daily", null -> null
-                                "weekdays" -> "1,2,3,4,5"
-                                else -> schedRepeat
-                            },
-                            intervalMinutes = schedInterval,
-                            geoLocationName = schedLocation,
-                            geoTriggerOnEnter = schedOnEnter
-                        )
-                        val id = dao.insertRoutine(routine).toInt()
-                        if (schedType != null) {
-                            ScheduleManager.register(this@AgentService, routine.copy(id = id))
-                        }
-                        Log.i(TAG, "Saved routine '$name' (id=$id, schedule=$schedType)")
+                onTranscript = { transcript ->
+                    scope.launch(historyWriter) {
+                        runCatching { historyRepo.saveSessionHistory(convId, SessionHistory.encode(transcript)) }
+                            .onFailure { Log.w(TAG, "Failed to save session history: ${it.message}") }
                     }
-                }
+                },
             )
             engine?.destroy()
             engine = newEngine
             currentConversationId = convId
             _engineFlow.value = newEngine
             observeConnectorState(b)
-            newEngine.start(instruction)
+            newEngine.start(instruction, start.summary, start.history)
             taskStarting = false
             startJob = null
             taskStartedAt = System.currentTimeMillis()
@@ -706,7 +711,10 @@ class AgentService : Service() {
 
         val convId = currentConversationId
         if (wasActive && convId != null) {
-            scope.launch { historyRepo.updateStatus(convId, "stopped") }
+            scope.launch {
+                historyRepo.addMessage(convId, MessageType.SYSTEM, getString(R.string.task_stopped))
+                historyRepo.updateStatus(convId, "stopped")
+            }
         }
         currentConversationId = null
         currentInstruction = ""
@@ -1116,7 +1124,8 @@ class AgentService : Service() {
                     if (!result.debugInfo.isNullOrBlank()) {
                         historyRepo.addMessage(convId, MessageType.AGENT_DEBUG, "[LLM]\n${result.debugInfo}")
                     }
-                } else if (!result.completed) {
+                } else if (!result.completed && result.actionType !in WAITING_ACTIONS) {
+                    // 提问 / 交给用户接管的那一步，问题和接管说明由下面的状态监听记下，这里的想法就不再单独记一条
                     val userMsg = result.thought.ifBlank { result.detail }
                     if (userMsg != lastHistoryStatus) {
                         if (lastHistoryStatus == null) {
@@ -1130,7 +1139,8 @@ class AgentService : Service() {
 
                 if (result.completed) {
                     val summary = when (result.actionType) {
-                        "finish" -> "✅ ${getString(R.string.task_complete, result.thought)}"
+                        // 完成时模型的 thought 就是给用户的答案，直接展示；✅ / ❌ / ⚠️ 是给界面认状态用的标记
+                        "finish" -> "✅ ${result.thought.ifBlank { getString(R.string.task_complete_step, result.step) }}"
                         "fail" -> "❌ ${getString(R.string.task_failed, result.detail.removePrefix("Task failed: "))}"
                         "max_steps" -> "⚠️ ${getString(R.string.task_max_steps, result.step)}"
                         "error" -> "❌ ${getString(R.string.task_error, result.detail)}"
@@ -1788,8 +1798,11 @@ class AgentService : Service() {
         }
         LiveUpdates.requestPromotion(builder)
         val notification = builder.build()
-        lastNotification = notification
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        synchronized(progressNotificationLock) {
+            if (resultNotificationShown) return
+            lastNotification = notification
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        }
     }
 
     /**
@@ -1835,8 +1848,10 @@ class AgentService : Service() {
         }
         LiveUpdates.requestPromotion(builder)
         val notification = builder.build()
-        lastNotification = notification
-        resultNotificationShown = true
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        synchronized(progressNotificationLock) {
+            lastNotification = notification
+            resultNotificationShown = true
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        }
     }
 }

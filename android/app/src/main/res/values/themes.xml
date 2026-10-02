@@ -52,4 +52,52 @@
         <item name="android:minWidth">0dp</item>
         <item name="android:minHeight">0dp</item>
     </style>
+
+    <!-- Main screen and memory screen: the voice assistant's dark Monet style. Real colors come from
+         MonetPalette (wallpaper) in code; these are the fallbacks before the first frame. -->
+    <style name="Theme.Tyfo.Main" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/main_accent</item>
+        <item name="colorAccent">@color/main_accent</item>
+        <item name="android:windowBackground">@color/main_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="alertDialogTheme">@style/ThemeOverlay.Tyfo.Main.AlertDialog</item>
+        <item name="android:alertDialogTheme">@style/ThemeOverlay.Tyfo.Main.AlertDialog</item>
+    </style>
+
+    <style name="ThemeOverlay.Tyfo.Main.AlertDialog" parent="ThemeOverlay.Material3.Dialog.Alert">
+        <item name="colorPrimary">@color/main_accent</item>
+        <item name="colorAccent">@color/main_accent</item>
+        <item name="android:colorAccent">@color/main_accent</item>
+    </style>
+
+    <!-- Side drawer rows -->
+    <style name="Tyfo.DrawerItem" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">52dp</item>
+        <item name="android:layout_marginBottom">2dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">16dp</item>
+    </style>
+
+    <style name="Tyfo.DrawerItem.Icon" parent="">
+        <item name="android:layout_width">22dp</item>
+        <item name="android:layout_height">22dp</item>
+        <item name="android:importantForAccessibility">no</item>
+    </style>
+
+    <style name="Tyfo.DrawerItem.Label" parent="">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginStart">16dp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">15sp</item>
+    </style>
 </resources>

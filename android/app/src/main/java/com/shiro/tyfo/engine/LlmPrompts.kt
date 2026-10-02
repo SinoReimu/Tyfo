@@ -55,15 +55,11 @@ Memory rules:
 - For temporary task info (e.g., prices found during comparison, page state), use note in 'key: value' format — visible only in subsequent steps of the current task.
 - For stable long-term user preferences, frequently used info, or workflow habits, use remember(memory_key, memory_value, memory_category) — stored in global memory and visible in future tasks. Only use remember for confirmed long-term stable information.
 
-Available actions: tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
+Available actions: tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category)
 - list_apps(keyword): Search installed apps by keyword. Returns matching app names you can use with open_app. Use when open_app fails to find an app.
 - note action: Record important current task information (e.g., prices, model numbers), format 'key: value' (e.g., 'JD price: 5999 yuan'). Recorded info is visible in every subsequent step of this task.
 - You can also attach a note parameter when performing other actions (e.g., tap, open_app) to record info without a separate step.
-- When comparing across apps (e.g., price comparison), make sure to record results with note after finding them in each app, then summarize and compare at the end.
-
-Routine & schedule rules:
-- save_routine: When the user asks to save an operation for later reuse, set up a recurring/scheduled task, or automate something (e.g., "save this", "do this every day", "run this when I get to the office"), use save_routine with appropriate parameters.
-- When finishing a task that the user might want to repeat regularly (ordering food, checking apps, etc.), include suggested_routine_name and suggested_routine_icon in your finish response. Omit for clearly one-off tasks."""
+- When comparing across apps (e.g., price comparison), make sure to record results with note after finding them in each app, then summarize and compare at the end."""
 
     private const val SYSTEM_PROMPT_ZH = """你是 Android 手机操控助手。你通过观察屏幕截图来控制手机。
 
@@ -90,15 +86,11 @@ Routine & schedule rules:
 - 临时任务信息（如本轮比价中查到的价格、页面状态）用 note，格式为 'key: value'，只在当前任务后续步骤可见。
 - 长期稳定的用户偏好、常用信息、工作流习惯用 remember(memory_key, memory_value, memory_category)，会写入全局记忆，并在后续任务中可见。只有确定是长期稳定信息时才 remember。
 
-可用操作：tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
+可用操作：tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category)
 - list_apps(keyword)：按关键词搜索已安装的应用，返回匹配的应用名称列表，可配合 open_app 使用。当 open_app 找不到应用时使用。
 - note 操作：用于记录当前任务重要信息（如价格、型号），格式为 'key: value'（如 '京东价格: 5999元'）。记录的信息会在本任务后续每一步可见。
 - 你也可以在执行其他操作（如 tap、open_app）时同时附带 note 参数来记录信息，不需要单独一步。
-- 跨应用比较时（如比价），务必在每个应用中查到结果后用 note 记录，最后汇总比较。
-
-例行任务规则：
-- save_routine：当用户要求保存操作以便重复使用、设置定时任务或自动化操作（如"存下来"、"每天都这样做"、"到公司后自动执行"）时，使用 save_routine 并填写相应参数。
-- 完成用户可能想重复的任务时（如点餐、查看应用等），在 finish 响应中附带 suggested_routine_name 和 suggested_routine_icon。明确的一次性任务不需要。"""
+- 跨应用比较时（如比价），务必在每个应用中查到结果后用 note 记录，最后汇总比较。"""
 
     // ── Tool descriptions ───────────────────────────────────────────────
 
@@ -126,17 +118,6 @@ Routine & schedule rules:
         "memory_key" to "Unique key for long-term memory (for remember), e.g. 'default city', 'user dietary preferences'",
         "memory_value" to "Long-term memory content (for remember)",
         "memory_category" to "Long-term memory category (for remember), e.g. preference, profile, workflow",
-        "routine_name" to "Short name for the routine (2-5 words), e.g. 'Check emails'",
-        "routine_icon" to "Single emoji icon for the routine, e.g. '📧'",
-        "routine_instruction" to "The instruction to save. If omitted, the current conversation's original instruction is used",
-        "schedule_type" to "Schedule type: time (fixed daily/weekly time), interval (every N minutes), geofence (location-based trigger)",
-        "schedule_time" to "Time in HH:MM format, e.g. '08:00' (for schedule_type=time)",
-        "schedule_repeat" to "Repeat pattern: 'daily', 'weekdays', or comma-separated days '1,3,5' where Mon=1..Sun=7 (for schedule_type=time)",
-        "schedule_interval" to "Interval in minutes, e.g. 30 (for schedule_type=interval)",
-        "schedule_location" to "Location name, e.g. 'office', 'home' (for schedule_type=geofence). Uses current location coordinates.",
-        "schedule_on_enter" to "true=trigger on arrival, false=trigger on departure (for schedule_type=geofence)",
-        "suggested_routine_name" to "When finishing a repeatable task, suggest a short routine name (2-5 chars). Omit for one-off tasks.",
-        "suggested_routine_icon" to "When finishing a repeatable task, suggest a single emoji icon. Omit for one-off tasks."
     )
 
     private val PARAM_DESCS_ZH = mapOf(
@@ -160,17 +141,6 @@ Routine & schedule rules:
         "memory_key" to "长期记忆的唯一键名（remember时使用），例如 '默认城市'、'用户饮食偏好'",
         "memory_value" to "长期记忆内容（remember时使用）",
         "memory_category" to "长期记忆分类（remember时使用），例如 preference、profile、workflow",
-        "routine_name" to "例行任务的简短名称（2-5个字），如 '查邮件'",
-        "routine_icon" to "例行任务的 emoji 图标，如 '📧'",
-        "routine_instruction" to "要保存的指令。省略时使用当前对话的原始指令",
-        "schedule_type" to "定时类型：time（固定时间）、interval（间隔重复）、geofence（位置触发）",
-        "schedule_time" to "时间，HH:MM 格式，如 '08:00'（schedule_type=time 时使用）",
-        "schedule_repeat" to "重复模式：'daily'（每天）、'weekdays'（工作日）、或自定义 '1,3,5'，周一=1..周日=7",
-        "schedule_interval" to "间隔分钟数，如 30（schedule_type=interval 时使用）",
-        "schedule_location" to "地点名称，如 '公司'、'家'（schedule_type=geofence 时使用）",
-        "schedule_on_enter" to "true=到达时触发，false=离开时触发（schedule_type=geofence 时使用）",
-        "suggested_routine_name" to "完成可重复任务时，建议一个简短的例行任务名称（2-5字）。一次性任务不需要。",
-        "suggested_routine_icon" to "完成可重复任务时，建议一个 emoji 图标。一次性任务不需要。"
     )
 
     // ── ActionRepeatGuard feedback ──────────────────────────────────────
@@ -206,7 +176,16 @@ Routine & schedule rules:
         "ui_elements_header" to "\n\n### Current UI Elements ###\n",
         "user_supplement_header" to "\n\n### User Supplemental Info ###\n",
         "global_memory_header" to "\n\n### Global Memory ###\n",
-        "notes_header" to "\n\n### Recorded Notes (Memory) ###\n"
+        "notes_header" to "\n\n### Recorded Notes (Memory) ###\n",
+        "conversation_context_header" to "\n\n### Earlier in this conversation ###\nThe user is continuing an earlier conversation with you. Below is a summary of every previous turn (oldest first); the detailed messages of the recent turns are also included earlier in this chat. Use them to understand what the new instruction refers to. The phone screen may have changed since then, so always act on the current screenshot.\n",
+        "ctx_user" to "User: ",
+        "ctx_asked" to "You asked: ",
+        "ctx_answered" to "User answered: ",
+        "ctx_added" to "User added: ",
+        "ctx_result" to "Result: ",
+        "ctx_progress" to "Last progress (no result): ",
+        "ctx_stopped" to "Ended without a result: ",
+        "ctx_omitted" to "(Earlier turns omitted.)"
     )
 
     private val AGENT_FEEDBACK_ZH = mapOf(
@@ -222,6 +201,15 @@ Routine & schedule rules:
         "ui_elements_header" to "\n\n### 当前界面元素 (UI Elements) ###\n",
         "user_supplement_header" to "\n\n### 用户补充信息 ###\n",
         "global_memory_header" to "\n\n### 全局记忆 ###\n",
-        "notes_header" to "\n\n### 已记录的笔记 (Memory) ###\n"
+        "notes_header" to "\n\n### 已记录的笔记 (Memory) ###\n",
+        "conversation_context_header" to "\n\n### 之前的对话 ###\n用户在继续之前和你的一段对话，下面是之前每一轮的摘要（按时间先后），最近几轮的详细消息也在前面的对话里。用它们理解新指令指的是什么；手机屏幕可能已经变了，操作始终以当前截图为准。\n",
+        "ctx_user" to "用户：",
+        "ctx_asked" to "你问：",
+        "ctx_answered" to "用户回答：",
+        "ctx_added" to "用户补充：",
+        "ctx_result" to "结果：",
+        "ctx_progress" to "最后的进度（没有结果）：",
+        "ctx_stopped" to "没有完成：",
+        "ctx_omitted" to "（更早的几轮已省略）"
     )
 }

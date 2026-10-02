@@ -13,7 +13,6 @@ class ConfigRepository(context: Context) {
         private const val KEY_MAX_STEPS = "max_steps"
         private const val KEY_API_PROVIDER = "api_provider"
         private const val KEY_DEBUG_MODE = "debug_mode"
-        private const val KEY_SHOW_DEBUG_ROUTINES = "show_debug_routines"
         private const val KEY_ACTIVE_PROFILE = "active_profile"
         private const val KEY_IM_REMOTE_ENABLED = "im_remote_enabled"
         private const val KEY_IM_SEND_STEP_SCREENSHOTS = "im_send_step_screenshots"
@@ -118,10 +117,6 @@ class ConfigRepository(context: Context) {
     var debugMode: Boolean
         get() = prefs.getBoolean(KEY_DEBUG_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_MODE, value).apply()
-
-    var showDebugRoutines: Boolean
-        get() = prefs.getBoolean(KEY_SHOW_DEBUG_ROUTINES, false)
-        set(value) = prefs.edit().putBoolean(KEY_SHOW_DEBUG_ROUTINES, value).apply()
 
     var imRemoteEnabled: Boolean
         get() = prefs.getBoolean(KEY_IM_REMOTE_ENABLED, false)

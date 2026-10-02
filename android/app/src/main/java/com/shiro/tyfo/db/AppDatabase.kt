@@ -12,14 +12,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ConversationEntity::class,
         ChatMessageEntity::class,
         GlobalMemoryEntity::class,
-        RoutineEntity::class
+        SessionHistoryEntity::class
     ],
-    version = 5
+    version = 7
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun globalMemoryDao(): GlobalMemoryDao
-    abstract fun routineDao(): RoutineDao
 
     companion object {
         @Volatile
@@ -96,6 +95,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** 保存的快捷指令 / 定时任务功能已移除，表一起删掉。 */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS routines")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `session_history` (`conversationId` INTEGER NOT NULL, " +
+                        "`messages` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`conversationId`), " +
+                        "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE )"
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -103,78 +120,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "tyfo.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
-                    .addCallback(object : Callback() {
-                        override fun onCreate(db: SupportSQLiteDatabase) {
-                            super.onCreate(db)
-                            // Pre-fill builtin routines on first creation
-                            populateBuiltinRoutines(db)
-                        }
-
-                        override fun onOpen(db: SupportSQLiteDatabase) {
-                            super.onOpen(db)
-                            db.query("SELECT COUNT(*) FROM routines").use { cursor ->
-                                if (cursor.moveToFirst() && cursor.getInt(0) == 0) {
-                                    populateBuiltinRoutines(db)
-                                }
-                            }
-                            // Ensure debug routines exist (added in later version)
-                            db.query("SELECT COUNT(*) FROM routines WHERE category = 'debug'").use { cursor ->
-                                if (cursor.moveToFirst() && cursor.getInt(0) == 0) {
-                                    populateDebugRoutines(db)
-                                }
-                            }
-                        }
-                    })
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build()
                     .also { INSTANCE = it }
             }
-
-        private fun populateBuiltinRoutines(db: SupportSQLiteDatabase) {
-            val now = System.currentTimeMillis()
-            val routines = listOf(
-                Triple("routine_coffee", "☕", "routine_coffee_instruction"),
-                Triple("routine_email", "📧", "routine_email_instruction"),
-                Triple("routine_calendar", "📅", "routine_calendar_instruction"),
-                Triple("routine_weather", "🌤️", "routine_weather_instruction"),
-                Triple("routine_open_app", "📱", "routine_open_app_instruction")
-            )
-            routines.forEachIndexed { index, (name, icon, instruction) ->
-                db.execSQL(
-                    """
-                    INSERT OR IGNORE INTO routines (name, icon, instruction, description, category, isPinned, useCount, lastUsedAt, createdAt, sortOrder, scheduleEnabled)
-                    VALUES (?, ?, ?, ?, 'builtin', 0, 0, NULL, ?, ?, 0)
-                    """.trimIndent(),
-                    arrayOf(name, icon, instruction, "${name}_desc", now, index)
-                )
-            }
-            // Debug routines (category = 'debug', shown only when show_debug_routines is on)
-            populateDebugRoutines(db)
-        }
-
-        private fun populateDebugRoutines(db: SupportSQLiteDatabase) {
-            val now = System.currentTimeMillis()
-            val debugRoutines = listOf(
-                Triple("routine_open_settings", "⚙", "action:open_settings")
-            )
-            debugRoutines.forEachIndexed { index, (name, icon, instruction) ->
-                db.execSQL(
-                    """
-                    INSERT OR IGNORE INTO routines (name, icon, instruction, description, category, isPinned, useCount, lastUsedAt, createdAt, sortOrder, scheduleEnabled)
-                    VALUES (?, ?, ?, ?, 'debug', 0, 0, NULL, ?, ?, 0)
-                    """.trimIndent(),
-                    arrayOf(name, icon, instruction, "${name}_desc", now, 100 + index)
-                )
-            }
-        }
-
-        fun ensureBuiltinRoutines(context: Context) {
-            val db = getInstance(context).openHelper.writableDatabase
-            db.query("SELECT COUNT(*) FROM routines").use { cursor ->
-                if (cursor.moveToFirst() && cursor.getInt(0) == 0) {
-                    populateBuiltinRoutines(db)
-                }
-            }
-        }
     }
 }

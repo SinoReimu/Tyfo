@@ -5,7 +5,7 @@ import android.content.Context
 import androidx.core.graphics.ColorUtils
 
 /**
- * 浮窗 / 语音助手的“莫奈色调”：从当前壁纸取主色，按固定的明暗关系生成一整套色调，换壁纸就跟着变。
+ * 浮窗 / 语音助手 / 主界面的“莫奈色调”：从当前壁纸取主色，按固定的明暗关系生成一整套色调，换壁纸就跟着变。
  *
  * 不直接用系统动态色板（android.R.color.system_*）：用户可以把系统主题设成固定的预设色
  * （比如这台 Pixel 的灰绿“Spritz”），那时系统色板跟壁纸无关，浮窗会变成一片灰。
@@ -29,6 +29,14 @@ class MonetPalette(context: Context) {
     /** 「查看画面」这类普通按钮。 */
     val tonalButton: Int
     val onTonalButton: Int
+    /** 主界面（不透明）的页面底色，比浮层面板暗一档，面板浮在上面才分得出层次。 */
+    val background: Int
+    /** 侧边栏底色：介于页面和面板之间。 */
+    val drawer: Int
+    /** 用户消息气泡。 */
+    val bubble: Int
+    /** 选中项（侧边栏里正在看的会话）的底色：带一点强调色的半透明。 */
+    val selected: Int
     /** 「停止」这类危险按钮、完成 / 失败状态，用固定的语义色。 */
     val dangerButton: Int = 0xFF5C2F2B.toInt()
     val onDangerButton: Int = 0xFFFFB4AB.toInt()
@@ -64,6 +72,10 @@ class MonetPalette(context: Context) {
         track = withAlpha(text, 0.12f)
         tonalButton = tone(0.18f, 0.25f)
         onTonalButton = tone(1f, 0.88f)
+        background = tone(0.16f, 0.105f)
+        drawer = tone(0.17f, 0.14f)
+        bubble = tone(0.22f, 0.22f)
+        selected = withAlpha(accent, 0.16f)
     }
 
     private fun withAlpha(color: Int, alpha: Float): Int =

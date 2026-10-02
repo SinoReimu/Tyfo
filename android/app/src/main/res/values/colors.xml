@@ -31,6 +31,10 @@
     <color name="text_cycle">#64748B</color>
     <color name="text_on_bubble_user">#F0FFFFFF</color>
 
+    <!-- Main screen fallbacks (MonetPalette sets the real ones) -->
+    <color name="main_background">#FF1F1A16</color>
+    <color name="main_accent">#FFF2B783</color>
+
     <!-- Dialog actions -->
     <color name="dialog_action">#7A5B00</color>
 

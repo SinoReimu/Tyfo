@@ -190,21 +190,10 @@
             android:summary="@string/pref_debug_mode_summary"
             android:defaultValue="false" />
 
-        <SwitchPreference
-            android:key="show_debug_routines"
-            android:title="@string/pref_show_debug_routines_title"
-            android:summary="@string/pref_show_debug_routines_summary"
-            android:defaultValue="false" />
-
         <Preference
             android:key="manage_memory"
             android:title="@string/btn_manage_memory"
             android:summary="@string/pref_manage_memory_summary" />
-
-        <Preference
-            android:key="scheduled_tasks"
-            android:title="@string/schedule_title"
-            android:icon="@android:drawable/ic_menu_recent_history" />
 
         <PreferenceScreen
             android:key="subscreen_advanced"

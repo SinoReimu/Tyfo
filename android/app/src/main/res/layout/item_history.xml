@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One past conversation in the side drawer. Background / colors set in DrawerHistoryAdapter. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="46dp"
+    android:layout_marginBottom="2dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp">
+
+    <TextView
+        android:id="@+id/history_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textSize="14.5sp"
+        tools:text="Check today's weather in Beijing" />
+
+    <View
+        android:id="@+id/history_running"
+        android:layout_width="7dp"
+        android:layout_height="7dp"
+        android:layout_marginStart="10dp"
+        android:visibility="gone"
+        tools:visibility="visible" />
+</LinearLayout>

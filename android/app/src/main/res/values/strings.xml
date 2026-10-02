@@ -109,8 +109,6 @@
     <string name="pref_feishu_app_secret_title">App Secret</string>
     <string name="pref_debug_mode_title">Debug Mode</string>
     <string name="pref_debug_mode_summary">Show LLM response details</string>
-    <string name="pref_show_debug_routines_title">Debug Routines</string>
-    <string name="pref_show_debug_routines_summary">Show debug shortcuts on home screen</string>
     <string name="pref_manage_memory_summary">View and edit agent memories</string>
     <string name="pref_advanced_title">Advanced</string>
     <string name="pref_advanced_summary">Manual IDs for debug and recovery</string>
@@ -221,86 +219,15 @@
     <string name="greeting_evening">Good evening</string>
     <string name="greeting_subtitle">What would you like to do?</string>
 
-    <!-- Home Screen Sections -->
-    <string name="section_recommended">Recommended</string>
-    <string name="section_quick_actions">Quick Actions</string>
-    <string name="section_recent">Recent</string>
-
-    <!-- Built-in Routines -->
-    <string name="routine_coffee">Order coffee</string>
-    <string name="routine_coffee_desc">Luckin/Starbucks</string>
-    <string name="routine_email">Check emails</string>
-    <string name="routine_email_desc">Unread summary</string>
-    <string name="routine_calendar">Today\'s schedule</string>
-    <string name="routine_calendar_desc">Calendar reminders</string>
-    <string name="routine_weather">Weather</string>
-    <string name="routine_weather_desc">Travel advice</string>
-    <string name="routine_open_app">Open app</string>
-    <string name="routine_open_app_desc">Launch specific app</string>
-    <string name="routine_coffee_instruction">Order a coffee, open Luckin or Starbucks</string>
-    <string name="routine_email_instruction">Check today\'s unread emails</string>
-    <string name="routine_calendar_instruction">Show today\'s schedule</string>
-    <string name="routine_weather_instruction">Check today\'s weather and travel advice</string>
-    <string name="routine_open_app_instruction">Open</string>
-
-    <!-- Debug Routines -->
-    <string name="routine_open_settings">Open Settings</string>
-    <string name="routine_open_settings_desc">Open app settings</string>
-
-    <!-- Routine Management -->
-    <string name="routine_save_title">Save as Routine</string>
-    <string name="routine_save_hint">Enter routine name</string>
-    <string name="routine_save_success">Routine saved</string>
-    <string name="routine_manage_title">Manage Routine</string>
-    <string name="routine_manage_edit">Edit</string>
-    <string name="routine_manage_delete">Delete</string>
-    <string name="routine_manage_pin">Pin to top</string>
-    <string name="routine_manage_unpin">Unpin</string>
-    <string name="routine_edit_title">Edit Routine</string>
-    <string name="routine_delete_title">Delete Routine</string>
-    <string name="routine_delete_message">Delete \"%s\"?</string>
-    <string name="routine_delete_confirm">Delete</string>
-    <string name="routine_instruction_hint">Instruction to send</string>
-
-    <!-- Schedule -->
-    <string name="schedule_title">Scheduled Tasks</string>
-    <string name="schedule_paused">Paused</string>
-    <string name="schedule_next">Next: %s</string>
-    <string name="schedule_last">Last: %s</string>
-    <string name="schedule_daily">Daily</string>
-    <string name="schedule_weekdays">Weekdays</string>
-    <string name="schedule_geo_arrive">On arrival at \"%s\"</string>
-    <string name="schedule_geo_leave">On departure from \"%s\"</string>
-    <string name="schedule_every_n_min">Every %d min</string>
-    <string name="schedule_created">Scheduled task created</string>
-    <string name="schedule_empty">No scheduled tasks</string>
-
     <!-- Overlay permission -->
     <string name="overlay_permission_title">Overlay Permission</string>
     <string name="overlay_permission_message">Tyfo can show a floating indicator while tasks run in the background. This is optional.</string>
     <string name="overlay_permission_grant">Grant</string>
 
-    <!-- Geofence setup -->
-    <string name="schedule_geo_enter_label">On arrival</string>
-    <string name="schedule_geo_leave_label">On departure</string>
-    <string name="schedule_geo_pick_title">Location Trigger</string>
-    <string name="schedule_geo_location_hint">Location name (e.g. Office, Home)</string>
-    <string name="schedule_geo_name_required">Please enter a location name</string>
-    <string name="schedule_perm_location_denied">Location permission denied. Geofence cannot be set.</string>
-
-    <!-- Routine save suggestions -->
-    <string name="routine_ai_suggest">Run this often? Save as routine</string>
-    <string name="routine_ai_save_btn">Save as Routine</string>
-    <string name="routine_ai_dismiss_btn">Dismiss</string>
-    <string name="routine_longpress_copy">Copy</string>
-    <string name="routine_longpress_save">Save as Routine</string>
-    <string name="routine_longpress_rerun">Run Again</string>
-    <string name="routine_manage_schedule">Set Schedule</string>
+    <!-- App occupancy -->
     <string name="app_occupied_by_agent">%1$s is in use by the agent until its task ends</string>
     <!-- Single-task gate / virtual display lifecycle -->
     <string name="task_busy_toast">A task is still running: %1$s</string>
-    <string name="task_skipped_title">Scheduled task skipped</string>
-    <string name="task_skipped_busy">Another task was running, so “%1$s” was skipped this time.</string>
     <string name="backend_connecting_toast">Connecting the privileged service, try again in a moment</string>
     <string name="task_start_failed_backend">Privileged service not connected, can’t start the task</string>
     <string name="task_start_failed_display">Couldn’t create the virtual display, task not started</string>
@@ -374,4 +301,30 @@
     <string name="asr_error_network">Couldn\'t reach the speech service, check the network</string>
     <string name="asr_error_server">Speech service error (%1$d)</string>
     <string name="asr_error_mic">Microphone is unavailable</string>
+
+    <!-- Main screen and side drawer -->
+    <string name="cd_open_drawer">Open menu</string>
+    <string name="drawer_new_task">New task</string>
+    <string name="drawer_memory">Manage memory</string>
+    <string name="drawer_settings">Settings</string>
+    <string name="drawer_recent">Recent</string>
+    <string name="drawer_empty">Tasks you run will show up here</string>
+    <string name="main_hint_new">Ask Tyfo to do something</string>
+    <string name="main_hint_continue">Continue this conversation</string>
+    <string name="main_hint_answer">Your answer</string>
+    <string name="main_status_done">Task complete</string>
+    <string name="main_status_failed">Task failed</string>
+    <string name="main_status_stopped">Stopped</string>
+    <string name="main_resume">Resume</string>
+    <string name="main_live_thinking">Thinking…</string>
+    <string name="main_question_label">Tyfo needs your answer</string>
+    <string name="main_supplement_label">Added info</string>
+    <string name="main_copied">Copied</string>
+    <string name="task_stopped">Stopped</string>
+    <string name="replace_task_title">Stop the current task?</string>
+    <string name="replace_task_message">“%1$s” is still running. Stop it and start this one?</string>
+    <string name="replace_task_confirm">Stop and start</string>
+    <string name="conversation_delete_title">Delete this conversation?</string>
+    <string name="conversation_delete_confirm">Delete</string>
+    <string name="conversation_delete_running">This task is still running. Stop it before deleting.</string>
 </resources>

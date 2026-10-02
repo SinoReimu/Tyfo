@@ -77,6 +77,20 @@ class AgentIconView @JvmOverloads constructor(
         targetLevel = value.coerceIn(0f, 1f)
     }
 
+    /** 直接切到某个状态的终态，不播底色渐变和对勾动画（列表里复用的图标绑定时用）。 */
+    fun setModeImmediate(value: Mode) {
+        fillAnimator?.cancel()
+        glyphAnimator?.cancel()
+        mode = value
+        fillAnimator?.cancel()
+        glyphAnimator?.cancel()
+        fillFrom = fillFor(value)
+        fillTo = fillFrom
+        fillT = 1f
+        glyphT = if (value == Mode.SUCCESS || value == Mode.ERROR) 1f else 0f
+        invalidate()
+    }
+
     private fun fillFor(m: Mode) = when (m) {
         Mode.SUCCESS -> palette.success
         Mode.ERROR -> palette.error

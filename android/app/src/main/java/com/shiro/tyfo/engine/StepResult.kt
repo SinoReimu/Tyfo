@@ -8,7 +8,5 @@ data class StepResult(
     val detail: String,
     val durationMs: Long,
     val completed: Boolean,
-    val debugInfo: String? = null,
-    val suggestedRoutineName: String? = null,
-    val suggestedRoutineIcon: String? = null
+    val debugInfo: String? = null
 )

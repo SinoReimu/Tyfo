@@ -1,20 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Agent message (result / question / past progress): no bubble, a status icon on the left like the
+     assistant panel's pill. Colors come from MonetPalette in ChatAdapter. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:paddingVertical="4dp">
+    android:orientation="horizontal"
+    android:paddingTop="8dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="6dp">
 
-    <TextView
-        android:id="@+id/text_message"
-        android:layout_width="wrap_content"
+    <FrameLayout
+        android:layout_width="28dp"
+        android:layout_height="28dp">
+
+        <com.shiro.tyfo.ui.fx.AgentIconView
+            android:id="@+id/icon"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_gravity="start"
-        android:maxWidth="280dp"
-        android:background="@drawable/bg_bubble_agent"
-        android:textColor="@color/on_surface_high"
-        android:textSize="14sp"
-        android:lineSpacingMultiplier="1.25"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="10dp"
-        android:fontFamily="sans-serif" />
-</FrameLayout>
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:minHeight="28dp"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/text_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="3dp"
+            android:fontFamily="sans-serif-medium"
+            android:textSize="12.5sp"
+            android:visibility="gone"
+            tools:text="Tyfo needs your answer"
+            tools:visibility="visible" />
+
+        <TextView
+            android:id="@+id/text_message"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingMultiplier="1.35"
+            android:textSize="15.5sp"
+            tools:text="It's 24°C and sunny in Beijing today." />
+    </LinearLayout>
+</LinearLayout>

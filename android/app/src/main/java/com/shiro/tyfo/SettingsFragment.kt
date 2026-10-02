@@ -355,12 +355,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 startActivity(Intent(requireContext(), MemoryActivity::class.java))
                 true
             }
-
-        findPreference<Preference>("scheduled_tasks")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                startActivity(Intent(requireContext(), com.shiro.tyfo.ui.ScheduleListActivity::class.java))
-                true
-            }
     }
 
     private fun setupBlacklistPreference() {

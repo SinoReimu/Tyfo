@@ -1,56 +1,80 @@
 package com.shiro.tyfo.ui
 
 import android.Manifest
-import android.text.format.DateUtils
-import com.shiro.tyfo.db.ConversationEntity
+import android.animation.ValueAnimator
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.util.Log
 import android.view.View
-import android.widget.Button
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsAnimationCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.doAfterTextChanged
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.SimpleItemAnimator
 import com.shiro.tyfo.AgentService
 import com.shiro.tyfo.R
-import com.shiro.tyfo.backend.SetupActivity
 import com.shiro.tyfo.SettingsActivity
-import com.shiro.tyfo.config.ConfigRepository
-import com.shiro.tyfo.db.AppDatabase
+import com.shiro.tyfo.backend.SetupActivity
 import com.shiro.tyfo.db.ChatHistoryRepository
-import com.shiro.tyfo.db.RoutineEntity
-import com.shiro.tyfo.db.RoutineDao
+import com.shiro.tyfo.db.ChatMessageEntity
+import com.shiro.tyfo.db.ConversationEntity
 import com.shiro.tyfo.engine.AgentEngine
 import com.shiro.tyfo.engine.AgentState
+import com.shiro.tyfo.ui.fx.AgentIconView
+import com.shiro.tyfo.ui.fx.AuraPalette
+import com.shiro.tyfo.ui.fx.MonetDialogs
+import com.shiro.tyfo.ui.fx.MonetDialogs.showTinted
+import com.shiro.tyfo.ui.fx.MonetPalette
+import com.shiro.tyfo.ui.fx.PanelFrameLayout
 import com.shiro.tyfo.voice.DoubaoStreamingSpeechInputEngine
 import com.shiro.tyfo.voice.VoiceInputController
 import com.shiro.tyfo.voice.VoiceInputTestBridge
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Calendar
 
 /**
- * Main control panel activity — chat-style interface for instructions and agent status.
- * "View" button launches ViewActivity with SurfaceView rendering VD content.
+ * 主界面，风格同长按电源键唤起的语音助手（莫奈扁平）：
+ * - 首页只放一段对话：正在执行的任务，或者从侧边栏载入的历史会话；没有就是新任务的问候页。
+ * - 左上角的半透明圆形按钮打开侧边栏（参考 Gemini）：新任务、管理记忆、设置，下面是全部历史会话。
+ * - 底部是任务卡片（状态、查看画面、停止）和输入胶囊。看历史会话时发出的话接着这段会话做，
+ *   之前几轮作为上下文交给模型（AgentService.startAgent 的 continueConversationId）。
+ *
+ * 对话内容直接读数据库（AgentService 边跑边写），界面只补两样：刚发出还没落库的指令，和正在进行的那一步的动画。
  */
 class ControlPanelActivity : AppCompatActivity() {
 
@@ -58,48 +82,72 @@ class ControlPanelActivity : AppCompatActivity() {
         private const val TAG = "ControlPanel"
         private const val REQUEST_RECORD_AUDIO = 2001
         private const val REQUEST_NOTIFICATIONS = 2002
-        private const val REQUEST_LOCATION = 2003
         private const val REQUEST_SETUP = 1001
+
+        /** 悬浮窗权限的提示每个进程只弹一次（它是可选的）。 */
+        private var overlayPromptShown = false
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** 已经发出、还没在记录里出现的指令。 */
+    private class Pending(val text: String, val sentAt: Long, val serial: Int)
+
+    /** 首页这段会话的任务进行到哪了（不是这段会话在跑就是 null）。 */
+    private enum class Phase { STARTING, RUNNING, ASKING, HANDOFF, PAUSED }
+
+    private val scope: CoroutineScope = MainScope()
+    private lateinit var palette: MonetPalette
+    private lateinit var historyRepo: ChatHistoryRepository
     private var agentService: AgentService? = null
     private var bound = false
     private var setupLaunched = false
-    private var stateCollectionJob: Job? = null
-    private var stepResultCollectionJob: Job? = null
-    private var engineSubscriptionJob: Job? = null
-    private lateinit var historyRepo: ChatHistoryRepository
-    private lateinit var config: ConfigRepository
+    private var serviceJobs: List<Job> = emptyList()
+    private var messagesJob: Job? = null
+
+    // 当前看的会话（null = 新任务）及其记录
+    private var viewedConversationId: Long? = null
+    private var messages: List<ChatMessageEntity> = emptyList()
+    private var messagesLoaded = false
+    private var pending: Pending? = null
+    private var forceScrollToEnd = false
+    // 最近一个引擎和它的状态：用来判断首页的会话是不是正在执行的那段
+    private var engine: AgentEngine? = null
+    private var engineState: AgentState? = null
+    private var engineConversationId: Long? = null
 
     // Views
-    private lateinit var statusText: TextView
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var mainRoot: FrameLayout
     private lateinit var chatRecycler: RecyclerView
     private lateinit var chatAdapter: ChatAdapter
-    private lateinit var inputBar: LinearLayout
-    private lateinit var actionButtons: LinearLayout
-    private lateinit var editInput: EditText
-    private lateinit var btnSend: Button
-    private lateinit var btnVoiceInput: Button
-    private lateinit var btnViewOp: Button
-    private lateinit var btnStop: Button
-    private lateinit var routinesContainer: ScrollView
+    private lateinit var emptyState: View
+    private lateinit var emptyIcon: AgentIconView
     private lateinit var textGreeting: TextView
-    private lateinit var cardRecommended: LinearLayout
-    private lateinit var recommendedIcon: TextView
-    private lateinit var recommendedName: TextView
-    private lateinit var recommendedDesc: TextView
-    private lateinit var routineChipsRecycler: RecyclerView
-    private lateinit var routineChipAdapter: RoutineChipAdapter
-    private lateinit var labelRecent: TextView
-    private lateinit var containerRecentRoutines: LinearLayout
+    private lateinit var topScrim: View
+    private lateinit var bottomScrim: View
+    private lateinit var btnDrawer: ImageView
+    private lateinit var bottomPanel: LinearLayout
+    private lateinit var taskCard: PanelFrameLayout
+    private lateinit var taskIcon: AgentIconView
+    private lateinit var statusText: TextView
+    private lateinit var btnViewOp: TextView
+    private lateinit var btnStop: TextView
+    private lateinit var inputPill: PanelFrameLayout
+    private lateinit var editInput: EditText
+    private lateinit var btnSend: ImageView
+    private lateinit var micHalo: View
+    private lateinit var drawer: LinearLayout
+    private lateinit var drawerActions: View
+    private lateinit var historyRecycler: RecyclerView
+    private lateinit var historyAdapter: DrawerHistoryAdapter
+    private lateinit var drawerEmpty: TextView
+
     private lateinit var voiceInputController: VoiceInputController
-    private lateinit var routineDao: RoutineDao
-    private var voiceTestReceiverRegistered = false
-    private var demoReceiverRegistered = false
-    private var scrollPending = false
-    private var lastInstruction: String? = null
-    private var hasVdContent = false
+    private var receiversRegistered = false
+    private var lastInsets: WindowInsetsCompat? = null
+    private var imeAnimating = false
+    private val micFill = GradientDrawable().apply { shape = GradientDrawable.OVAL }
+    private var micColors: Pair<Int, Int>? = null
+    private var micAnimator: ValueAnimator? = null
 
     private val demoReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -128,7 +176,7 @@ class ControlPanelActivity : AppCompatActivity() {
                 Thread {
                     val result = com.shiro.tyfo.backend.LocalVdPoc.test(context)
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        android.widget.Toast.makeText(context, result.takeLast(100), android.widget.Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, result.takeLast(100), Toast.LENGTH_LONG).show()
                     }
                 }.start()
                 return
@@ -169,7 +217,7 @@ class ControlPanelActivity : AppCompatActivity() {
                         index++
                         handler.postDelayed(this, delay)
                     } else {
-                        handler.postDelayed({ btnSend.performClick() }, 500L)
+                        handler.postDelayed({ submitInput() }, 500L)
                     }
                 }
             }
@@ -191,11 +239,11 @@ class ControlPanelActivity : AppCompatActivity() {
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val service = (binder as? AgentService.AgentBinder)?.getService()
+            val service = (binder as? AgentService.AgentBinder)?.getService() ?: return
             agentService = service
             bound = true
             Log.i(TAG, "Bound to AgentService")
-            subscribeToEngineFlow()
+            observeService(service)
             // Auto-launch setup if no backend available (standard flavor first launch)
             checkBackendAndPromptSetup(service)
         }
@@ -203,217 +251,59 @@ class ControlPanelActivity : AppCompatActivity() {
         override fun onServiceDisconnected(name: ComponentName?) {
             agentService = null
             bound = false
-            engineSubscriptionJob?.cancel()
-            stateCollectionJob?.cancel()
-            stepResultCollectionJob?.cancel()
+            serviceJobs.forEach { it.cancel() }
+            serviceJobs = emptyList()
+            engine = null
+            engineState = null
+            render()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_control_panel)
+        palette = MonetPalette(this)
         historyRepo = ChatHistoryRepository(this)
-        config = ConfigRepository(this)
 
-        // Bind views
-        statusText = findViewById(R.id.text_status)
-        chatRecycler = findViewById(R.id.recycler_chat)
-        inputBar = findViewById(R.id.input_bar)
-        actionButtons = findViewById(R.id.action_buttons)
-        editInput = findViewById(R.id.edit_input)
-        btnSend = findViewById(R.id.btn_send)
-        btnVoiceInput = findViewById(R.id.btn_voice_input)
-        btnViewOp = findViewById(R.id.btn_view_operation)
-        btnStop = findViewById(R.id.btn_stop)
+        bindViews()
+        applyPalette()
+        setupInsets()
+        setupChat()
+        setupInput()
+        setupDrawer()
 
         voiceInputController = VoiceInputController(
             DoubaoStreamingSpeechInputEngine(this),
-            editTextTarget(editInput),
-            object : VoiceInputController.Listener {
-                override fun onListeningChanged(isListening: Boolean) {
-                    btnVoiceInput.text = if (isListening) "■" else "🎙"
-                    btnVoiceInput.isSelected = isListening
+            object : VoiceInputController.TextTarget {
+                override fun getText(): String = editInput.text.toString()
+                override fun setText(text: String) {
+                    editInput.setText(text)
+                    editInput.setSelection(editInput.text.length)
                 }
-
+            },
+            object : VoiceInputController.Listener {
+                override fun onListeningChanged(isListening: Boolean) = renderMic()
                 override fun onError(message: String) {
                     Toast.makeText(this@ControlPanelActivity, message, Toast.LENGTH_SHORT).show()
                 }
             }
         )
-        registerVoiceTestReceiver()
+        registerReceivers()
 
-        // Chat setup
-        chatAdapter = ChatAdapter { message, view ->
-            val popup = android.widget.PopupMenu(this, view)
-            popup.menu.add(0, 1, 0, R.string.routine_longpress_copy)
-            popup.menu.add(0, 2, 0, R.string.routine_longpress_save)
-            popup.menu.add(0, 3, 0, R.string.routine_longpress_rerun)
-            popup.setOnMenuItemClickListener { item ->
-                when (item.itemId) {
-                    1 -> {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("instruction", message.text))
-                        Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
-                    }
-                    2 -> showSaveRoutineDialog(message)
-                    3 -> {
-                        val service = agentService ?: return@setOnMenuItemClickListener true
-                        ensureServiceStarted()
-                        if (startTaskOrExplain(service, message.text)) {
-                            chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, message.text))
-                        }
-                    }
-                }
-                true
-            }
-            popup.show()
-        }
-        chatRecycler.layoutManager = LinearLayoutManager(this).apply {
-            stackFromEnd = true
-        }
-        chatRecycler.adapter = chatAdapter
-
-        // Send button — start agent or submit answer
-        btnSend.setOnClickListener {
-            val text = editInput.text.toString().trim()
-            if (text.isEmpty()) return@setOnClickListener
-
-            val service = agentService
-            if (service == null) {
-                Toast.makeText(this, "Service not connected", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-
-            val currentState = service.stateFlow?.value
-            when (currentState) {
-                is AgentState.WaitingForUser -> {
-                    chatAdapter.addMessage(ChatMessage(MessageType.USER_ANSWER, text))
-                    service.submitUserResponse(text)
-                    editInput.text.clear()
-                    editInput.hint = getString(R.string.supplement_hint)
-                }
-                is AgentState.Running, is AgentState.Paused, is AgentState.WaitingForHandoff -> {
-                    chatAdapter.addMessage(ChatMessage(MessageType.USER_SUPPLEMENT, getString(R.string.supplement_prefix, text)))
-                    service.submitUserSupplement(text)
-                    editInput.text.clear()
-                    editInput.hint = getString(R.string.supplement_hint)
-                }
-                else -> {
-                    if (!ensureBackendOrSetup(service)) return@setOnClickListener
-                    // Check overlay permission before starting agent task
-                    if (!android.provider.Settings.canDrawOverlays(this)) {
-                        androidx.appcompat.app.AlertDialog.Builder(this)
-                            .setTitle(R.string.overlay_permission_title)
-                            .setMessage(R.string.overlay_permission_message)
-                            .setPositiveButton(R.string.overlay_permission_grant) { _, _ ->
-                                startActivity(
-                                    Intent(
-                                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                        android.net.Uri.parse("package:$packageName")
-                                    )
-                                )
-                            }
-                            .setNegativeButton(R.string.routine_ai_dismiss_btn, null)
-                            .show()
-                    }
-                    ensureServiceStarted()
-                    if (!startTaskOrExplain(service, text)) return@setOnClickListener
-                    chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, text))
-                    lastInstruction = text
-                    hasVdContent = false
-                    editInput.text.clear()
-                    actionButtons.visibility = View.VISIBLE
-                    hideRoutines()
-                }
-            }
-            scrollChatToBottom()
-        }
-
-        btnVoiceInput.setOnClickListener {
-            if (voiceInputController.isListening) {
-                voiceInputController.stop()
-            } else if (ensureRecordAudioPermission()) {
-                voiceInputController.start()
-            }
-        }
-
-        findViewById<Button>(R.id.btn_history).setOnClickListener {
-            startActivity(Intent(this, ConversationHistoryActivity::class.java))
-        }
-
-        findViewById<Button>(R.id.btn_memory).setOnClickListener {
-            startActivity(Intent(this, MemoryActivity::class.java))
-        }
-
-        // Settings button
-        findViewById<Button>(R.id.btn_settings).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
-        }
-
-        // Routines (idle state)
-        routinesContainer = findViewById(R.id.routines_container)
-        textGreeting = findViewById(R.id.text_greeting)
-        cardRecommended = findViewById(R.id.card_recommended)
-        recommendedIcon = findViewById(R.id.recommended_icon)
-        recommendedName = findViewById(R.id.recommended_name)
-        recommendedDesc = findViewById(R.id.recommended_desc)
-        routineChipsRecycler = findViewById(R.id.recycler_routine_chips)
-        labelRecent = findViewById(R.id.label_recent)
-        containerRecentRoutines = findViewById(R.id.container_recent_routines)
-
-        routineDao = AppDatabase.getInstance(this).routineDao()
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                if (routineDao.getCount() == 0) {
-                    AppDatabase.ensureBuiltinRoutines(this@ControlPanelActivity)
-                }
-            }
-        }
-
-        routineChipAdapter = RoutineChipAdapter(
-            onItemClick = { routine -> executeRoutine(routine) },
-            onItemLongClick = { routine -> showRoutineManageDialog(routine) }
-        )
-        routineChipsRecycler.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
-        routineChipsRecycler.adapter = routineChipAdapter
-
-        cardRecommended.setOnClickListener {
-            val routine = cardRecommended.tag as? RoutineEntity ?: return@setOnClickListener
-            executeRoutine(routine)
-        }
-        cardRecommended.setOnLongClickListener {
-            val routine = cardRecommended.tag as? RoutineEntity ?: return@setOnLongClickListener false
-            showRoutineManageDialog(routine)
-            true
-        }
-
-        // View/Resume button — context-dependent
         btnViewOp.setOnClickListener {
             val service = agentService ?: return@setOnClickListener
-            val currentState = service.stateFlow?.value
-            if (currentState is AgentState.Paused) {
-                // Resume the paused agent
+            if (service.stateFlow?.value is AgentState.Paused) {
                 service.resumeAgent()
-            } else {
-                // View operation — launch ViewActivity with SurfaceView
-                service.enterViewMode()
+            } else if (!service.enterViewMode()) {
+                // 画面已经回收了（AgentService 会提示），卡片也没用了
+                render()
             }
         }
+        btnStop.setOnClickListener { agentService?.stopAgent() }
 
-        // Stop agent
-        btnStop.setOnClickListener { stopAgent() }
-
-        // Start and bind AgentService
+        showConversation(null)
         ensureServiceStarted()
-
-        // Show routines on idle
-        scope.launch {
-            val recent = historyRepo.getRecentConversations(1)
-            if (recent.isEmpty()) {
-                chatAdapter.addMessage(ChatMessage(MessageType.SYSTEM, "Ready. Enter an instruction to start."))
-            }
-            showHomepage()
-        }
 
         // Start OverlayService so the floating pill is available when the user
         // backgrounds Tyfo with an active agent.
@@ -421,32 +311,19 @@ class ControlPanelActivity : AppCompatActivity() {
 
         // Request notification permission on Android 13+
         if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(
-                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                REQUEST_NOTIFICATIONS
-            )
-        }
-
-        // Handle ask_user notification tap from cold start.
-        if (intent.getBooleanExtra(AgentService.EXTRA_FOCUS_ASK, false)) {
-            chatRecycler.post { scrollChatToBottom() }
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }
     }
 
     override fun onDestroy() {
-        engineSubscriptionJob?.cancel()
-        stateCollectionJob?.cancel()
-        stepResultCollectionJob?.cancel()
         voiceInputController.destroy()
-        if (voiceTestReceiverRegistered) {
+        micAnimator?.cancel()
+        if (receiversRegistered) {
             unregisterReceiver(voiceTestReceiver)
-            voiceTestReceiverRegistered = false
-        }
-        if (demoReceiverRegistered) {
             unregisterReceiver(demoReceiver)
-            demoReceiverRegistered = false
+            receiversRegistered = false
         }
         if (bound) {
             unbindService(connection)
@@ -456,310 +333,44 @@ class ControlPanelActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /**
-     * 没有可用的特权后端时：还在连 root 就提示稍等，否则打开引导页。返回 true 表示可以开始任务。
-     */
-    private fun ensureBackendOrSetup(service: AgentService): Boolean {
-        val backendName = service.activeBackendName
-        if (backendName != null && backendName != "none") return true
-        if (service.backendDetecting.value) {
-            Toast.makeText(this, R.string.backend_connecting_toast, Toast.LENGTH_SHORT).show()
-            return false
-        }
-        setupLaunched = true
-        @Suppress("DEPRECATION")
-        startActivityForResult(Intent(this, SetupActivity::class.java), REQUEST_SETUP)
-        return false
-    }
-
-    private fun checkBackendAndPromptSetup(service: AgentService?) {
-        service ?: return
-        // Wait for the startup detection (root needs the su grant plus starting the
-        // service) instead of guessing with a fixed delay.
-        scope.launch {
-            service.backendDetecting.first { !it }
-            val backendName = service.activeBackendName
-            if (backendName == null || backendName == "none") {
-                // No backend — launch setup wizard on first run
-                val prefs = getSharedPreferences("tyfo_config", MODE_PRIVATE)
-                val setupDismissed = prefs.getBoolean("setup_dismissed", false)
-                if (!setupDismissed && !setupLaunched) {
-                    Log.i(TAG, "No backend detected, launching SetupActivity")
-                    setupLaunched = true
-                    withContext(Dispatchers.Main) {
-                        @Suppress("DEPRECATION")
-                        startActivityForResult(
-                            Intent(this@ControlPanelActivity, SetupActivity::class.java),
-                            REQUEST_SETUP
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private fun ensureRecordAudioPermission(): Boolean {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            return true
-        }
-        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
-        Toast.makeText(this, "Microphone permission is required", Toast.LENGTH_SHORT).show()
-        return false
-    }
-
-    private fun registerVoiceTestReceiver() {
-        val filter = IntentFilter(VoiceInputTestBridge.ACTION)
-        val demoFilter = IntentFilter("com.shiro.tyfo.TEST")
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(voiceTestReceiver, filter, RECEIVER_NOT_EXPORTED)
-            registerReceiver(demoReceiver, demoFilter, RECEIVER_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(voiceTestReceiver, filter)
-            registerReceiver(demoReceiver, demoFilter)
-        }
-        voiceTestReceiverRegistered = true
-        demoReceiverRegistered = true
-    }
-
-    private fun editTextTarget(editText: EditText): VoiceInputController.TextTarget =
-        object : VoiceInputController.TextTarget {
-            override fun getText(): String = editText.text.toString()
-            override fun setText(text: String) {
-                editText.setText(text)
-                editText.setSelection(editText.text.length)
-            }
-        }
-
-    private fun ensureServiceStarted() {
-        val intent = Intent(this, AgentService::class.java)
-        startForegroundService(intent)
-        if (!bound) {
-            bindService(intent, connection, Context.BIND_AUTO_CREATE)
-        }
-    }
-
-    /** 同一时间只跑一个任务：被占用时提示正在执行什么，返回 false。 */
-    private fun startTaskOrExplain(service: AgentService, instruction: String): Boolean {
-        if (service.startAgent(instruction) == AgentService.StartResult.STARTED) return true
-        val running = service.currentInstruction.ifBlank { getString(R.string.app_name) }
-        Toast.makeText(this, getString(R.string.task_busy_toast, running.take(24)), Toast.LENGTH_SHORT).show()
-        return false
-    }
-
-    private fun stopAgent() {
-        agentService?.stopAgent()
-        actionButtons.visibility = View.GONE
-        chatAdapter.addMessage(ChatMessage(MessageType.SYSTEM, "Agent stopped"))
-        scrollChatToBottom()
-    }
-
-    // ── State collection ───────────────────────────────────────────────
-
-    /**
-     * Subscribe to AgentService.engineFlow and re-bind state collectors
-     * each time a new AgentEngine is created. Multi-subscriber StateFlow
-     * means we no longer fight OverlayService for the same callback slot.
-     */
-    private fun subscribeToEngineFlow() {
-        engineSubscriptionJob?.cancel()
-        val service = agentService ?: return
-        engineSubscriptionJob = scope.launch {
-            service.engineFlow.collect { engine ->
-                if (engine != null) {
-                    collectStateUpdates()
-                    loadActiveConversationIfNeeded(service)
-                } else {
-                    stateCollectionJob?.cancel()
-                    stepResultCollectionJob?.cancel()
-                }
-            }
-        }
-    }
-
-    private fun collectStateUpdates() {
-        stateCollectionJob?.cancel()
-        stepResultCollectionJob?.cancel()
-
-        stateCollectionJob = agentService?.stateFlow?.let { flow ->
-            scope.launch {
-                flow.collect { state ->
-                    withContext(Dispatchers.Main) { onStateChanged(state) }
-                }
-            }
-        }
-
-        stepResultCollectionJob = agentService?.stepResultFlow?.let { flow ->
-            scope.launch {
-                flow.collect { result ->
-                    withContext(Dispatchers.Main) {
-                    // Track whether VD has meaningful content (agent executed at least one action)
-                    if (result.success && result.actionType in AgentEngine.SIDE_EFFECT_ACTIONS) {
-                        hasVdContent = true
-                        btnViewOp.isEnabled = true
-                    }
-                    if (config.debugMode) {
-                        val prefix = if (result.success) "" else "[FAIL] "
-                        val msg = "[Step ${result.step}] ${prefix}${result.actionType}: ${result.detail}"
-                        chatAdapter.addMessage(ChatMessage(MessageType.AGENT_STATUS, msg))
-                        if (!result.debugInfo.isNullOrBlank()) {
-                            chatAdapter.addMessage(
-                                ChatMessage(
-                                    MessageType.AGENT_DEBUG,
-                                    "[LLM]\n${result.debugInfo}"
-                                )
-                            )
-                        }
-                    } else if (!result.completed) {
-                        val userMsg = result.thought.ifBlank { result.detail }
-                        if (!chatAdapter.hasCycle()) {
-                            chatAdapter.startCycle()
-                        }
-                        chatAdapter.updateCycleText(userMsg)
-                    }
-
-                    if (result.completed) {
-                        val summary = when (result.actionType) {
-                            "finish" -> "✅ ${getString(R.string.task_complete, result.thought)}"
-                            "fail" -> "❌ ${getString(R.string.task_failed, result.detail.removePrefix("Task failed: "))}"
-                            "max_steps" -> "⚠️ ${getString(R.string.task_max_steps, result.step)}"
-                            "error" -> "❌ ${getString(R.string.task_error, result.detail)}"
-                            else -> "✅ ${getString(R.string.task_complete_step, result.step)}"
-                        }
-                        if (config.debugMode) {
-                            chatAdapter.addMessage(ChatMessage(MessageType.AGENT_RESULT, summary))
-                        } else {
-                            chatAdapter.convertCycleToResult(summary)
-                        }
-                        if (result.actionType == "finish" &&
-                            result.suggestedRoutineName != null &&
-                            result.suggestedRoutineIcon != null) {
-                            showRoutineSuggestionCard(
-                                result.suggestedRoutineName,
-                                result.suggestedRoutineIcon,
-                                lastInstruction ?: ""
-                            )
-                        }
-                    }
-                    scrollChatToBottom()
-                    }
-                }
-            }
-        }
-    }
-
-    private fun onStateChanged(state: AgentState) {
-        when (state) {
-            is AgentState.Idle -> {
-                stopCycleAnimation()
-                val profileName = config.activeProfileName
-                statusText.text = if (profileName.isNotEmpty()) "Tyfo · $profileName" else "Tyfo"
-                // Keep View button visible if VD is still alive for inspection
-                val hasVd = agentService?.getVirtualDisplayManager()?.isCreated == true
-                actionButtons.visibility = if (hasVd) View.VISIBLE else View.GONE
-                btnStop.visibility = if (hasVd) View.VISIBLE else View.GONE
-                btnViewOp.text = "View"
-                btnViewOp.isEnabled = hasVdContent
-                editInput.hint = "Ask me anything..."
-                editInput.isEnabled = true
-                btnSend.text = "▲"
-                // Show routines if no active conversation
-                if (agentService?.currentConversationId == null && chatAdapter.itemCount <= 1) {
-                    showHomepage()
-                }
-            }
-            is AgentState.Running -> {
-                hideRoutines()
-                statusText.text = if (config.debugMode) {
-                    "Running (${state.step}/${config.maxSteps})"
-                } else {
-                    "Running"
-                }
-                if (config.debugMode) {
-                    chatAdapter.updateLastAgentStatus(state.thought)
-                }
-                scrollChatToBottom()
-                actionButtons.visibility = View.VISIBLE
-                btnViewOp.text = "View"
-                btnViewOp.isEnabled = hasVdContent
-                editInput.hint = getString(R.string.supplement_hint)
-                editInput.isEnabled = true
-                btnSend.text = "▲"
-            }
-            is AgentState.Paused -> {
-                statusText.text = "Paused"
-                actionButtons.visibility = View.VISIBLE
-                btnViewOp.text = "Resume"
-                btnStop.visibility = View.VISIBLE
-                editInput.hint = getString(R.string.supplement_hint)
-                editInput.isEnabled = true
-            }
-            is AgentState.Error -> {
-                stopCycleAnimation()
-                statusText.text = "Error"
-                chatAdapter.addMessage(ChatMessage(MessageType.AGENT_RESULT, "Error: ${state.message}"))
-                actionButtons.visibility = View.GONE
-                editInput.isEnabled = true
-                btnSend.text = "▲"
-                scrollChatToBottom()
-            }
-            is AgentState.WaitingForUser -> {
-                stopCycleAnimation()
-                statusText.text = "Waiting for your answer..."
-                chatAdapter.addMessage(ChatMessage(MessageType.AGENT_QUESTION, state.question))
-                editInput.hint = "Your answer..."
-                editInput.isEnabled = true
-                btnSend.text = "▲"
-                actionButtons.visibility = View.VISIBLE
-                scrollChatToBottom()
-            }
-            is AgentState.WaitingForHandoff -> {
-                stopCycleAnimation()
-                statusText.text = "Waiting for handoff..."
-                chatAdapter.addMessage(
-                    ChatMessage(
-                        MessageType.AGENT_STATUS,
-                        getString(R.string.handoff_sensitive_input, state.reason)
-                    )
-                )
-                editInput.hint = getString(R.string.handoff_waiting_hint)
-                editInput.isEnabled = true
-                btnSend.text = "▲"
-                actionButtons.visibility = View.VISIBLE
-                btnViewOp.text = "View"
-                scrollChatToBottom()
-            }
-        }
-    }
-
-    private fun stopCycleAnimation() {
-        chatAdapter.removeCycle()
-    }
-
-    /** Load messages from DB if an active conversation exists but chat is empty (e.g. IM-started task). */
-    private fun loadActiveConversationIfNeeded(service: AgentService) {
-        val convId = service.currentConversationId ?: return
-        if (chatAdapter.itemCount > 1) return // already loaded
-        scope.launch {
-            val messages = historyRepo.getMessages(convId)
-            if (messages.isEmpty()) return@launch
-            withContext(Dispatchers.Main) {
-                messages.forEach { entity ->
-                    val type = try { MessageType.valueOf(entity.type) } catch (_: Exception) { MessageType.SYSTEM }
-                    chatAdapter.addMessage(ChatMessage(type, entity.text, entity.timestamp))
-                }
-                hideRoutines()
-                scrollChatToBottom()
-            }
-        }
-    }
-
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 通知里点进来（任务在等回答等）：回到正在执行的那段会话
         if (intent.getBooleanExtra(AgentService.EXTRA_FOCUS_ASK, false)) {
-            scrollChatToBottom()
+            followActiveTask()
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        greet()
+        // Re-check backend on resume — handles case where user enabled wireless debugging
+        // while we were in the background (SetupActivity may have been destroyed)
+        val service = agentService ?: return
+        val backendName = service.activeBackendName
+        if ((backendName == null || backendName == "none") && !service.backendDetecting.value) {
+            val shizukuPresent =
+                com.shiro.tyfo.backend.ShizukuConnector.status() !=
+                    com.shiro.tyfo.backend.ShizukuStatus.UNAVAILABLE
+            // Root is retried by the setup screen, wireless ADB only once the user picked it.
+            val wirelessReady = com.shiro.tyfo.backend.SetupStateDetector.isWirelessAdbChosen(this) &&
+                com.shiro.tyfo.backend.SetupStateDetector.isWirelessDebuggingEnabled(this)
+            if (shizukuPresent || wirelessReady) {
+                scope.launch {
+                    Log.i(TAG, "A privilege backend is available, retrying detection...")
+                    if (service.retryBackendDetection()) {
+                        Log.i(TAG, "Backend reconnected on resume")
+                        setupLaunched = false
+                    } else if (!setupLaunched) {
+                        Log.i(TAG, "Retry failed, launching SetupActivity")
+                        launchSetup()
+                    }
+                }
+            }
+        }
+        // 闲置回收后虚拟屏没了，“查看画面”也该收起来
+        render()
     }
 
     @Suppress("DEPRECATION")
@@ -773,505 +384,772 @@ class ControlPanelActivity : AppCompatActivity() {
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == REQUEST_LOCATION) {
-            val routine = pendingGeofenceRoutine ?: return
-            pendingGeofenceRoutine = null
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                showGeofenceLocationDialog(routine)
-            } else {
-                Toast.makeText(this, R.string.schedule_perm_location_denied, Toast.LENGTH_SHORT).show()
-            }
-        }
+    // ── 视图 ─────────────────────────────────────────────────────────────
+
+    private fun bindViews() {
+        drawerLayout = findViewById(R.id.drawer_layout)
+        mainRoot = findViewById(R.id.main_root)
+        chatRecycler = findViewById(R.id.recycler_chat)
+        emptyState = findViewById(R.id.empty_state)
+        emptyIcon = findViewById(R.id.empty_icon)
+        textGreeting = findViewById(R.id.text_greeting)
+        topScrim = findViewById(R.id.top_scrim)
+        bottomScrim = findViewById(R.id.bottom_scrim)
+        btnDrawer = findViewById(R.id.btn_drawer)
+        bottomPanel = findViewById(R.id.bottom_panel)
+        taskCard = findViewById(R.id.task_card)
+        taskIcon = findViewById(R.id.task_icon)
+        statusText = findViewById(R.id.text_status)
+        btnViewOp = findViewById(R.id.btn_view_operation)
+        btnStop = findViewById(R.id.btn_stop)
+        inputPill = findViewById(R.id.input_pill)
+        editInput = findViewById(R.id.edit_input)
+        btnSend = findViewById(R.id.btn_send)
+        micHalo = findViewById(R.id.mic_halo)
+        drawer = findViewById(R.id.drawer)
+        drawerActions = findViewById(R.id.drawer_actions)
+        historyRecycler = findViewById(R.id.recycler_history)
+        drawerEmpty = findViewById(R.id.drawer_empty)
     }
 
-    override fun onResume() {
-        super.onResume()
-
-        // Re-check backend on resume — handles case where user enabled wireless debugging
-        // while we were in the background (SetupActivity may have been destroyed)
-        val service = agentService
-        if (service != null) {
-            val backendName = service.activeBackendName
-            if ((backendName == null || backendName == "none") && !service.backendDetecting.value) {
-                val shizukuPresent =
-                    com.shiro.tyfo.backend.ShizukuConnector.status() !=
-                        com.shiro.tyfo.backend.ShizukuStatus.UNAVAILABLE
-                // Root is retried by the setup screen, wireless ADB only once the user picked it.
-                val wirelessReady = com.shiro.tyfo.backend.SetupStateDetector.isWirelessAdbChosen(this) &&
-                    com.shiro.tyfo.backend.SetupStateDetector.isWirelessDebuggingEnabled(this)
-                if (shizukuPresent || wirelessReady) {
-                    scope.launch {
-                        Log.i(TAG, "A privilege backend is available, retrying detection...")
-                        val success = service.retryBackendDetection()
-                        if (success) {
-                            Log.i(TAG, "Backend reconnected on resume")
-                            setupLaunched = false
-                        } else if (!setupLaunched) {
-                            Log.i(TAG, "Retry failed, launching SetupActivity")
-                            setupLaunched = true
-                            @Suppress("DEPRECATION")
-                            startActivityForResult(
-                                Intent(this@ControlPanelActivity, SetupActivity::class.java),
-                                REQUEST_SETUP
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Refresh routines if idle
-        val state = agentService?.stateFlow?.value
-        if (state is AgentState.Idle || state == null) {
-            if (agentService?.currentConversationId == null && chatAdapter.itemCount <= 1) {
-                showHomepage()
-            }
-        }
-    }
-
-    private fun getGreeting(): String {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        return when {
-            hour < 12 -> getString(R.string.greeting_morning)
-            hour < 14 -> getString(R.string.greeting_noon)
-            hour < 18 -> getString(R.string.greeting_afternoon)
-            else -> getString(R.string.greeting_evening)
-        }
-    }
-
-    private fun showHomepage() {
-        scope.launch(Dispatchers.Main) {
-            // Update greeting
-            textGreeting.text = getGreeting()
-
-            // Load data from DB on IO thread
-            val recommended: RoutineEntity?
-            val chips: MutableList<RoutineEntity>
-            val recent: List<ConversationEntity>
-            withContext(Dispatchers.IO) {
-                recommended = routineDao.getPinnedRoutine()
-                    ?: routineDao.getMostUsedRoutine()
-                chips = routineDao.getBuiltinRoutines().filter { !it.isPinned }.toMutableList()
-                if (config.showDebugRoutines) {
-                    chips.addAll(routineDao.getDebugRoutines())
-                }
-                recent = historyRepo.getRecentConversations(3)
-            }
-
-            // Update UI on Main thread
-            if (recommended != null) {
-                recommendedIcon.text = recommended.icon
-                val nameResId = resources.getIdentifier(recommended.name, "string", packageName)
-                recommendedName.text = if (nameResId != 0) getString(nameResId) else recommended.name
-                if (recommended.description != null) {
-                    val descResId = resources.getIdentifier(recommended.description, "string", packageName)
-                    recommendedDesc.text = if (descResId != 0) getString(descResId) else recommended.description
-                    recommendedDesc.visibility = View.VISIBLE
-                } else {
-                    recommendedDesc.visibility = View.GONE
-                }
-                cardRecommended.tag = recommended
-                cardRecommended.visibility = View.VISIBLE
-            } else {
-                cardRecommended.visibility = View.GONE
-            }
-
-            routineChipAdapter.submitList(chips)
-
-            if (recent.isNotEmpty()) {
-                labelRecent.visibility = View.VISIBLE
-                containerRecentRoutines.visibility = View.VISIBLE
-                containerRecentRoutines.removeAllViews()
-                recent.forEach { conv ->
-                    val itemView = layoutInflater.inflate(R.layout.item_routine_recent, containerRecentRoutines, false)
-                    bindRecentItem(itemView, conv)
-                    itemView.setOnClickListener {
-                        val intent = Intent(this@ControlPanelActivity, ConversationDetailActivity::class.java).apply {
-                            putExtra("conversation_id", conv.id)
-                            putExtra("conversation_title", conv.title)
-                            putExtra("conversation_status", conv.status)
-                            putExtra("conversation_created_at", conv.createdAt)
-                        }
-                        startActivity(intent)
-                    }
-                    containerRecentRoutines.addView(itemView)
-                }
-            } else {
-                labelRecent.visibility = View.GONE
-                containerRecentRoutines.visibility = View.GONE
-            }
-
-            // Show routines container, hide chat
-            routinesContainer.visibility = View.VISIBLE
-            chatRecycler.visibility = View.GONE
-            actionButtons.visibility = View.GONE
-        }
-    }
-
-    private fun bindRecentItem(itemView: View, conv: ConversationEntity) {
-        val iconText = itemView.findViewById<TextView>(R.id.recent_icon)
-        val nameText = itemView.findViewById<TextView>(R.id.recent_name)
-        val descText = itemView.findViewById<TextView>(R.id.recent_desc)
-
-        iconText.text = "💬"  // 💬
-        nameText.text = conv.title
-
-        val relativeTime = DateUtils.getRelativeTimeSpanString(
-            conv.updatedAt, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS
+    /** 颜色全部来自莫奈色板（随壁纸变），布局里不写死。 */
+    private fun applyPalette() {
+        window.decorView.setBackgroundColor(palette.background)
+        mainRoot.setBackgroundColor(palette.background)
+        bottomScrim.background = GradientDrawable(
+            GradientDrawable.Orientation.BOTTOM_TOP,
+            intArrayOf(palette.background, palette.background, palette.background and 0x00FFFFFF),
         )
-        descText.text = relativeTime
-        descText.visibility = View.VISIBLE
+        textGreeting.setTextColor(palette.text)
+        findViewById<TextView>(R.id.text_greeting_sub).setTextColor(palette.textSecondary)
+        emptyIcon.mode = AgentIconView.Mode.IDLE
+        taskIcon.showRing = true
+        taskCard.panel.cornerRadius = dp(28).toFloat()
+        inputPill.panel.cornerRadius = dp(30).toFloat()
+        statusText.setTextColor(palette.text)
+        styleButton(btnViewOp, palette.tonalButton, palette.onTonalButton)
+        styleButton(btnStop, palette.dangerButton, palette.onDangerButton)
+
+        editInput.setTextColor(palette.text)
+        editInput.setHintTextColor(palette.textSecondary)
+        editInput.highlightColor = palette.accent and 0x00FFFFFF or 0x55000000
+        editInput.textCursorDrawable = GradientDrawable().apply {
+            setColor(palette.accent)
+            setSize(maxOf(2, dp(2)), 0)
+        }
+        btnSend.background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), micFill, null)
+        micHalo.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(palette.accent and 0x00FFFFFF or 0x40000000)
+        }
+
+        // 左上角：浮在内容上的半透明圆形按钮（同预览页的返回按钮）
+        btnDrawer.imageTintList = ColorStateList.valueOf(palette.text)
+        btnDrawer.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(palette.surfaceLite)
+                setStroke(maxOf(1, dp(1) / 2), palette.hairlineStrong)
+            },
+            null,
+        )
+
+        // 侧边栏：右侧两个角是圆的
+        drawer.background = GradientDrawable().apply {
+            val r = dp(28).toFloat()
+            cornerRadii = floatArrayOf(0f, 0f, r, r, r, r, 0f, 0f)
+            setColor(palette.drawer)
+        }
+        for ((row, icon, label) in listOf(
+            Triple(R.id.drawer_new_task, R.id.drawer_new_task_icon, R.id.drawer_new_task_label),
+            Triple(R.id.drawer_memory, R.id.drawer_memory_icon, R.id.drawer_memory_label),
+            Triple(R.id.drawer_settings, R.id.drawer_settings_icon, R.id.drawer_settings_label),
+        )) {
+            findViewById<View>(row).background = RippleDrawable(
+                ColorStateList.valueOf(0x22FFFFFF),
+                null,
+                GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(0xFFFFFFFF.toInt()) },
+            )
+            findViewById<ImageView>(icon).imageTintList = ColorStateList.valueOf(palette.text)
+            findViewById<TextView>(label).setTextColor(palette.text)
+        }
+        findViewById<View>(R.id.drawer_divider).setBackgroundColor(palette.hairlineStrong)
+        findViewById<TextView>(R.id.drawer_recent_label).setTextColor(palette.textSecondary)
+        drawerEmpty.setTextColor(palette.textSecondary)
+        drawerLayout.setScrimColor(0x99000000.toInt())
+        drawerLayout.drawerElevation = 0f
     }
 
-    private fun executeRoutine(routine: RoutineEntity) {
-        // Handle action: prefixed instructions (debug routines that launch activities)
-        if (routine.instruction.startsWith("action:")) {
-            when (routine.instruction.removePrefix("action:")) {
-                "open_settings" -> startActivity(Intent(this, SettingsActivity::class.java))
-            }
-            scope.launch {
-                withContext(Dispatchers.IO) {
-                    routineDao.incrementUseCount(routine.id, System.currentTimeMillis())
+    /** 扁平按钮：色块底 + 左侧线性图标 + 文字，图标和文字同色（同任务浮窗 / 语音助手）。 */
+    private fun styleButton(button: TextView, bg: Int, fg: Int) {
+        button.setTextColor(fg)
+        button.compoundDrawableTintList = ColorStateList.valueOf(fg)
+        button.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(bg) },
+            null,
+        )
+    }
+
+    /**
+     * 整个窗口画到系统栏后面：左上角按钮和列表让开状态栏，底部面板让开导航条和输入法。
+     * 输入法弹出 / 收起时跟着动画逐帧移动，不是等动画结束一下跳过去。
+     */
+    private fun setupInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(drawerLayout) { _, insets ->
+            lastInsets = insets
+            applyInsets(insets)
+            insets
+        }
+        ViewCompat.setWindowInsetsAnimationCallback(
+            drawerLayout,
+            object : WindowInsetsAnimationCompat.Callback(
+                WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE
+            ) {
+                override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) imeAnimating = true
+                }
+
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>,
+                ): WindowInsetsCompat {
+                    if (imeAnimating) placeBottomPanel(insets)
+                    return insets
+                }
+
+                override fun onEnd(animation: WindowInsetsAnimationCompat) {
+                    if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) {
+                        imeAnimating = false
+                        lastInsets?.let { applyInsets(it) }
+                    }
                 }
             }
+        )
+        // 列表底部留出底部面板的高度，内容能滚到面板上方；面板变高（多行输入、任务卡片出现）时跟着变
+        bottomPanel.addOnLayoutChangeListener { _, _, top, _, _, _, oldTop, _, _ ->
+            if (top != oldTop) updateChatBottomPadding()
+        }
+    }
+
+    private fun applyInsets(insets: WindowInsetsCompat) {
+        val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        (btnDrawer.layoutParams as FrameLayout.LayoutParams).let {
+            if (it.topMargin != bars.top + dp(8)) {
+                it.topMargin = bars.top + dp(8)
+                btnDrawer.layoutParams = it
+            }
+        }
+        // 状态栏那一段完全不透明，下面再渐隐，滚上去的内容不会和状态栏图标叠在一起
+        val scrimHeight = bars.top + dp(64)
+        topScrim.layoutParams = topScrim.layoutParams.apply { height = scrimHeight }
+        topScrim.background = GradientDrawable().apply {
+            orientation = GradientDrawable.Orientation.TOP_BOTTOM
+            setColors(
+                intArrayOf(palette.background, palette.background, palette.background and 0x00FFFFFF),
+                floatArrayOf(0f, bars.top.toFloat() / scrimHeight, 1f),
+            )
+        }
+        chatRecycler.setPadding(chatRecycler.paddingLeft, bars.top + dp(64), chatRecycler.paddingRight, chatRecycler.paddingBottom)
+        drawerActions.setPadding(drawerActions.paddingLeft, bars.top + dp(16), drawerActions.paddingRight, drawerActions.paddingBottom)
+        historyRecycler.setPadding(historyRecycler.paddingLeft, 0, historyRecycler.paddingRight, bars.bottom + dp(16))
+        if (!imeAnimating) placeBottomPanel(insets)
+    }
+
+    private fun placeBottomPanel(insets: WindowInsetsCompat) {
+        val bottom = maxOf(
+            insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom,
+            insets.getInsets(WindowInsetsCompat.Type.ime()).bottom,
+        )
+        val lp = bottomPanel.layoutParams as FrameLayout.LayoutParams
+        val margin = bottom + dp(10) - inputPill.panel.shadowMargin
+        if (lp.bottomMargin != margin) {
+            lp.bottomMargin = margin
+            bottomPanel.layoutParams = lp
+        }
+    }
+
+    private fun updateChatBottomPadding() {
+        val atEnd = isAtEnd()
+        val panelTop = bottomPanel.top + inputPill.panel.shadowMargin
+        val padding = (mainRoot.height - panelTop + dp(12)).coerceAtLeast(0)
+        // 面板下面（导航条那段）也遮住，往上一点渐隐，滚动的内容不会从面板缝里露出来
+        val scrimHeight = (mainRoot.height - panelTop + dp(24)).coerceAtLeast(0)
+        if (bottomScrim.layoutParams.height != scrimHeight) {
+            bottomScrim.layoutParams = bottomScrim.layoutParams.apply { height = scrimHeight }
+        }
+        if (chatRecycler.paddingBottom != padding) {
+            chatRecycler.setPadding(chatRecycler.paddingLeft, chatRecycler.paddingTop, chatRecycler.paddingRight, padding)
+            if (atEnd) scrollToEnd(smooth = false)
+        }
+    }
+
+    // ── 对话 ─────────────────────────────────────────────────────────────
+
+    private fun setupChat() {
+        chatAdapter = ChatAdapter(palette) { item -> copyToClipboard(item.text) }
+        chatRecycler.layoutManager = LinearLayoutManager(this).apply { stackFromEnd = true }
+        chatRecycler.adapter = chatAdapter
+        // 进行中那一行的文字每步都在变，别每次都交叉淡入淡出
+        (chatRecycler.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
+    }
+
+    /** 切换首页显示的会话；null 是新任务。 */
+    private fun showConversation(conversationId: Long?) {
+        messagesJob?.cancel()
+        messagesJob = null
+        val changed = conversationId != viewedConversationId
+        viewedConversationId = conversationId
+        if (changed) {
+            messages = emptyList()
+            messagesLoaded = conversationId == null
+        }
+        forceScrollToEnd = true
+        if (::historyAdapter.isInitialized) historyAdapter.selectedId = conversationId
+        if (conversationId != null) {
+            messagesJob = scope.launch {
+                historyRepo.observeMessages(conversationId).collect { list ->
+                    messages = list
+                    messagesLoaded = true
+                    // 指令已经写进记录了，去掉界面上那条临时的
+                    val p = pending
+                    if (p != null && list.any {
+                            it.type == MessageType.USER_INPUT.name && it.text == p.text && it.timestamp >= p.sentAt
+                        }
+                    ) {
+                        pending = null
+                    }
+                    render()
+                }
+            }
+        }
+        render()
+    }
+
+    /** 有任务在执行就切过去看它。 */
+    private fun followActiveTask() {
+        val service = agentService ?: return
+        val convId = service.currentConversationId ?: return
+        if (service.isTaskActive && convId != viewedConversationId) showConversation(convId)
+    }
+
+    /**
+     * 首页的会话是不是正在执行的那段（含刚发出、引擎还没起来的时候），是的话进行到哪了。
+     * 引擎发出结束状态时循环可能还差一点才退出（isTaskActive 晚一拍变 false），结束状态一律不算在跑。
+     */
+    private fun activePhase(): Phase? {
+        val service = agentService ?: return null
+        if (!service.isTaskActive) return null
+        if (pending != null) return Phase.STARTING
+        val convId = service.currentConversationId
+        if (viewedConversationId == null || viewedConversationId != convId) return null
+        // 只认这段会话自己的引擎；新引擎还没起来时手上的是上一个任务的状态
+        val state = if (engine === service.engineFlow.value && engineConversationId == convId) engineState else null
+        return when (state) {
+            is AgentState.Running -> Phase.RUNNING
+            is AgentState.WaitingForUser -> Phase.ASKING
+            is AgentState.WaitingForHandoff -> Phase.HANDOFF
+            is AgentState.Paused -> Phase.PAUSED
+            is AgentState.Error -> null
+            is AgentState.Idle -> if (state.resultMessage != null) null else Phase.STARTING
+            null -> Phase.STARTING
+        }
+    }
+
+    private fun render() {
+        if (!::chatAdapter.isInitialized) return
+        val phase = activePhase()
+
+        // 正在进行的那一步：执行中，或者刚发出、引擎还在准备
+        val liveText = when (phase) {
+            Phase.RUNNING -> getString(R.string.main_live_thinking)
+            Phase.STARTING -> getString(R.string.assist_task_starting)
+            else -> null
+        }
+        emptyState.visibility = if (viewedConversationId == null && pending == null) View.VISIBLE else View.GONE
+        if (messagesLoaded) {
+            val rows = ChatRows.build(messages, pending?.text, liveText)
+            val previousCount = chatAdapter.itemCount
+            val stick = forceScrollToEnd || isAtEnd()
+            forceScrollToEnd = false
+            chatAdapter.submitList(rows) {
+                // 一两行的增量平滑滚过去；整段换掉（切换会话）直接定位到底
+                if (stick) scrollToEnd(smooth = previousCount > 0 && rows.size - previousCount in 0..3)
+            }
+        }
+
+        renderTaskCard(phase)
+        renderHint(phase)
+
+        // 任务刚结束时循环可能还没退出：过一会儿再看一眼，别停在“执行中”
+        if (phase == null && agentService?.isTaskActive == true) {
+            chatRecycler.removeCallbacks(rerender)
+            chatRecycler.postDelayed(rerender, 400)
+        }
+    }
+
+    private val rerender = Runnable { render() }
+
+    private fun renderTaskCard(phase: Phase?) {
+        val service = agentService
+        // 任务结束了、画面还留着：可以回看最后的画面
+        val finishedHere = phase == null && service != null && !service.isTaskActive &&
+            viewedConversationId != null && viewedConversationId == service.currentConversationId &&
+            engineConversationId == viewedConversationId &&
+            service.getVirtualDisplayManager()?.isCreated == true
+        if (phase == null && !finishedHere) {
+            if (taskCard.visibility == View.VISIBLE) fade(taskCard, show = false)
             return
         }
+        btnViewOp.setText(R.string.island_open)
+        btnViewOp.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_ui_eye, 0, 0, 0)
+        btnStop.visibility = if (phase != null) View.VISIBLE else View.GONE
+        when (phase) {
+            Phase.RUNNING -> {
+                taskIcon.mode = AgentIconView.Mode.RUNNING
+                val step = (engineState as? AgentState.Running)?.step ?: 1
+                statusText.text = getString(R.string.assist_task_running, step)
+            }
+            Phase.ASKING -> {
+                taskIcon.mode = AgentIconView.Mode.WAITING
+                statusText.setText(R.string.island_waiting_answer)
+            }
+            Phase.HANDOFF -> {
+                taskIcon.mode = AgentIconView.Mode.WAITING
+                statusText.setText(R.string.island_waiting_handoff)
+            }
+            Phase.PAUSED -> {
+                taskIcon.mode = AgentIconView.Mode.IDLE
+                statusText.setText(R.string.overlay_paused)
+                btnViewOp.setText(R.string.main_resume)
+                btnViewOp.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0, 0, 0)
+            }
+            Phase.STARTING -> {
+                taskIcon.mode = AgentIconView.Mode.THINKING
+                statusText.setText(R.string.assist_task_starting)
+            }
+            null -> {
+                val failed = engineState is AgentState.Error
+                taskIcon.mode = if (failed) AgentIconView.Mode.ERROR else AgentIconView.Mode.SUCCESS
+                statusText.setText(if (failed) R.string.main_status_failed else R.string.main_status_done)
+            }
+        }
+        if (taskCard.visibility != View.VISIBLE) fade(taskCard, show = true)
+    }
 
+    private fun renderHint(phase: Phase?) {
+        val hint = when (phase) {
+            Phase.ASKING -> R.string.main_hint_answer
+            Phase.HANDOFF -> R.string.handoff_waiting_hint
+            Phase.RUNNING, Phase.PAUSED, Phase.STARTING -> R.string.supplement_hint
+            null -> if (viewedConversationId != null) R.string.main_hint_continue else R.string.main_hint_new
+        }
+        val text = getString(hint)
+        if (editInput.hint?.toString() != text) editInput.hint = text
+    }
+
+    private fun isAtEnd(): Boolean {
+        val lm = chatRecycler.layoutManager as? LinearLayoutManager ?: return true
+        val count = chatAdapter.itemCount
+        return count == 0 || lm.findLastVisibleItemPosition() >= count - 1 || !chatRecycler.canScrollVertically(1)
+    }
+
+    private fun scrollToEnd(smooth: Boolean) {
+        val count = chatAdapter.itemCount
+        if (count == 0) return
+        if (smooth) chatRecycler.smoothScrollToPosition(count - 1) else chatRecycler.scrollToPosition(count - 1)
+    }
+
+    private fun copyToClipboard(text: String) {
+        val (_, body) = ChatRows.splitOutcome(text)
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Tyfo", body))
+        Toast.makeText(this, R.string.main_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun greet() {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        textGreeting.setText(
+            when {
+                hour < 12 -> R.string.greeting_morning
+                hour < 14 -> R.string.greeting_noon
+                hour < 18 -> R.string.greeting_afternoon
+                else -> R.string.greeting_evening
+            }
+        )
+    }
+
+    // ── 服务 ─────────────────────────────────────────────────────────────
+
+    private fun ensureServiceStarted() {
+        val intent = Intent(this, AgentService::class.java)
+        startForegroundService(intent)
+        if (!bound) {
+            bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    private fun observeService(service: AgentService) {
+        serviceJobs.forEach { it.cancel() }
+        var first = true
+        val engineJob = scope.launch {
+            service.engineFlow.collectLatest { newEngine ->
+                val isNew = newEngine != null && newEngine !== engine
+                engine = newEngine
+                if (newEngine == null) {
+                    engineState = null
+                    engineConversationId = null
+                    render()
+                    return@collectLatest
+                }
+                if (isNew) {
+                    engineConversationId = service.currentConversationId
+                    engineState = null
+                    // 新起的任务（从这里、语音助手或 IM 发起）切过去看；刚打开界面时只跟正在执行的那个
+                    val convId = engineConversationId
+                    if (convId != null && (!first || service.isTaskActive) && convId != viewedConversationId) {
+                        showConversation(convId)
+                    }
+                }
+                first = false
+                newEngine.state.collect { state ->
+                    engineState = state
+                    render()
+                }
+            }
+        }
+        val eventsJob = scope.launch {
+            service.taskEvents.collect { event ->
+                if (event is AgentService.TaskEvent.StartFailed && event.serial == pending?.serial) {
+                    // 没跑起来：撤掉临时消息，指令放回输入框
+                    val text = pending?.text
+                    pending = null
+                    if (!text.isNullOrBlank() && editInput.text.isBlank()) {
+                        editInput.setText(text)
+                        editInput.setSelection(editInput.text.length)
+                    }
+                    render()
+                }
+            }
+        }
+        // 虚拟屏闲置回收了：“查看画面”收起来
+        val displayJob = scope.launch {
+            service.virtualDisplayAlive.collect { render() }
+        }
+        serviceJobs = listOf(engineJob, eventsJob, displayJob)
+        render()
+    }
+
+    /**
+     * 没有可用的特权后端时：还在连 root 就提示稍等，否则打开引导页。返回 true 表示可以开始任务。
+     */
+    private fun ensureBackendOrSetup(service: AgentService): Boolean {
+        val backendName = service.activeBackendName
+        if (backendName != null && backendName != "none") return true
+        if (service.backendDetecting.value) {
+            Toast.makeText(this, R.string.backend_connecting_toast, Toast.LENGTH_SHORT).show()
+            return false
+        }
+        launchSetup()
+        return false
+    }
+
+    private fun checkBackendAndPromptSetup(service: AgentService) {
+        // Wait for the startup detection (root needs the su grant plus starting the
+        // service) instead of guessing with a fixed delay.
+        scope.launch {
+            service.backendDetecting.first { !it }
+            val backendName = service.activeBackendName
+            if (backendName == null || backendName == "none") {
+                // No backend — launch setup wizard on first run
+                val prefs = getSharedPreferences("tyfo_config", MODE_PRIVATE)
+                val setupDismissed = prefs.getBoolean("setup_dismissed", false)
+                if (!setupDismissed && !setupLaunched) {
+                    Log.i(TAG, "No backend detected, launching SetupActivity")
+                    launchSetup()
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchSetup() {
+        setupLaunched = true
+        startActivityForResult(Intent(this, SetupActivity::class.java), REQUEST_SETUP)
+    }
+
+    // ── 输入 ─────────────────────────────────────────────────────────────
+
+    private fun setupInput() {
+        editInput.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                submitInput()
+                true
+            } else {
+                false
+            }
+        }
+        editInput.doAfterTextChanged { renderMic() }
+        btnSend.setOnClickListener {
+            when {
+                editInput.text.isNotBlank() -> {
+                    if (voiceInputController.isListening) voiceInputController.stop()
+                    submitInput()
+                }
+                voiceInputController.isListening -> voiceInputController.stop()
+                ensureRecordAudioPermission() -> voiceInputController.start()
+            }
+        }
+        renderMic()
+    }
+
+    /**
+     * 发送：本段会话的任务在跑就当补充（在等回答就当回答）；别的任务在跑先问要不要停掉它；
+     * 否则开始新任务——看着历史会话时接着那段会话做。
+     */
+    private fun submitInput() {
+        val text = editInput.text.toString().trim()
+        if (text.isEmpty()) return
         val service = agentService
         if (service == null) {
             Toast.makeText(this, "Service not connected", Toast.LENGTH_SHORT).show()
             return
         }
-
-        // Increment use count
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                routineDao.incrementUseCount(routine.id, System.currentTimeMillis())
+        val phase = activePhase()
+        if (phase != null) {
+            if (phase == Phase.STARTING) {
+                // 引擎还在准备，补充没地方放
+                Toast.makeText(this, R.string.assist_task_starting, Toast.LENGTH_SHORT).show()
+                return
             }
-        }
-
-        // Clear focus and dismiss IME before starting agent to prevent
-        // focus-change cascade when hideRoutines() makes EditText visible
-        editInput.clearFocus()
-        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-        imm.hideSoftInputFromWindow(editInput.windowToken, 0)
-
-        // Resolve instruction from string resource (builtin routines store resource keys)
-        val instrResId = resources.getIdentifier(routine.instruction, "string", packageName)
-        val instruction = if (instrResId != 0) getString(instrResId) else routine.instruction
-
-        if (!ensureBackendOrSetup(service)) return
-
-        // Send instruction to agent
-        ensureServiceStarted()
-        if (!startTaskOrExplain(service, instruction)) return
-        chatAdapter.addMessage(ChatMessage(MessageType.USER_INPUT, instruction))
-        lastInstruction = instruction
-        hasVdContent = false
-        editInput.text.clear()
-        actionButtons.visibility = View.VISIBLE
-        hideRoutines()
-        scrollChatToBottom()
-    }
-
-    private fun hideRoutines() {
-        routinesContainer.visibility = View.GONE
-        chatRecycler.visibility = View.VISIBLE
-    }
-
-    private fun showSaveRoutineDialog(message: ChatMessage) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_save_routine, null)
-        val editName = dialogView.findViewById<EditText>(R.id.edit_routine_name)
-        val editIcon = dialogView.findViewById<EditText>(R.id.edit_routine_icon)
-        val editInstruction = dialogView.findViewById<EditText>(R.id.edit_routine_instruction)
-
-        // Hide instruction field — pre-filled from message
-        editInstruction.visibility = View.GONE
-
-        editName.setText("")
-        editIcon.setText("⚡")
-
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_save_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.memory_dialog_save) { _, _ ->
-                val name = editName.text.toString().trim()
-                val icon = editIcon.text.toString().trim()
-                if (name.isNotBlank()) {
-                    saveRoutine(name, icon.ifBlank { "⚡" }, message.text)
-                }
+            if (phase == Phase.ASKING) {
+                service.submitUserResponse(text)
+            } else {
+                service.submitUserSupplement(text)
             }
-            .setNegativeButton(R.string.memory_dialog_cancel, null)
-            .show()
-    }
-
-    private fun showRoutineSuggestionCard(name: String, icon: String, instruction: String) {
-        if (instruction.isBlank()) return
-        val dialogView = layoutInflater.inflate(R.layout.dialog_save_routine, null)
-        val editName = dialogView.findViewById<EditText>(R.id.edit_routine_name)
-        val editIcon = dialogView.findViewById<EditText>(R.id.edit_routine_icon)
-        val editInstruction = dialogView.findViewById<EditText>(R.id.edit_routine_instruction)
-
-        editName.setText(name)
-        editIcon.setText(icon)
-        editInstruction.setText(instruction)
-        editInstruction.visibility = View.GONE
-
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_ai_save_btn)
-            .setView(dialogView)
-            .setPositiveButton(R.string.memory_dialog_save) { _, _ ->
-                val n = editName.text.toString().trim()
-                val ic = editIcon.text.toString().trim()
-                if (n.isNotBlank()) {
-                    saveRoutine(n, ic.ifBlank { icon }, instruction)
-                }
-            }
-            .setNegativeButton(R.string.routine_ai_dismiss_btn, null)
-            .show()
-    }
-
-    private fun saveRoutine(name: String, icon: String, instruction: String) {
-        scope.launch {
-            val routine = RoutineEntity(
-                name = name,
-                icon = icon,
-                instruction = instruction,
-                description = null,
-                category = "custom",
-                isPinned = false,
-                useCount = 0,
-                lastUsedAt = null,
-                createdAt = System.currentTimeMillis(),
-                sortOrder = 100 // custom routines at the end
-            )
-            withContext(Dispatchers.IO) {
-                routineDao.insertRoutine(routine)
-            }
-            Toast.makeText(this@ControlPanelActivity, R.string.routine_save_success, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun showRoutineManageDialog(routine: RoutineEntity) {
-        val items = arrayOf(
-            getString(R.string.routine_manage_edit),
-            getString(R.string.routine_manage_delete),
-            if (routine.isPinned) getString(R.string.routine_manage_unpin)
-            else getString(R.string.routine_manage_pin),
-            getString(R.string.routine_manage_schedule)
-        )
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_manage_title)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> showEditRoutineDialog(routine)
-                    1 -> confirmDeleteRoutine(routine)
-                    2 -> togglePin(routine)
-                    3 -> showEditScheduleDialog(routine)
-                }
-            }
-            .show()
-    }
-
-    private fun showEditRoutineDialog(routine: RoutineEntity) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_save_routine, null)
-        val editName = dialogView.findViewById<EditText>(R.id.edit_routine_name)
-        val editIcon = dialogView.findViewById<EditText>(R.id.edit_routine_icon)
-        val editInstruction = dialogView.findViewById<EditText>(R.id.edit_routine_instruction)
-
-        val nameResId = resources.getIdentifier(routine.name, "string", packageName)
-        editName.setText(if (nameResId != 0) getString(nameResId) else routine.name)
-        editIcon.setText(routine.icon)
-        val instrResId = resources.getIdentifier(routine.instruction, "string", packageName)
-        editInstruction.setText(if (instrResId != 0) getString(instrResId) else routine.instruction)
-
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_edit_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.memory_dialog_save) { _, _ ->
-                val name = editName.text.toString().trim()
-                val icon = editIcon.text.toString().trim()
-                val instruction = editInstruction.text.toString().trim()
-                if (name.isNotBlank() && instruction.isNotBlank()) {
-                    updateRoutine(routine.copy(
-                        name = name,
-                        icon = icon.ifBlank { routine.icon },
-                        instruction = instruction
-                    ))
-                }
-            }
-            .setNegativeButton(R.string.memory_dialog_cancel, null)
-            .show()
-    }
-
-    private fun confirmDeleteRoutine(routine: RoutineEntity) {
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_delete_title)
-            .setMessage(getString(R.string.routine_delete_message, routine.name))
-            .setPositiveButton(R.string.routine_delete_confirm) { _, _ ->
-                deleteRoutine(routine)
-            }
-            .setNegativeButton(R.string.memory_dialog_cancel, null)
-            .show()
-    }
-
-    private fun updateRoutine(routine: RoutineEntity) {
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                routineDao.updateRoutine(routine)
-            }
-            showHomepage()
-        }
-    }
-
-    private fun deleteRoutine(routine: RoutineEntity) {
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                routineDao.deleteRoutine(routine)
-            }
-            showHomepage()
-        }
-    }
-
-    private fun togglePin(routine: RoutineEntity) {
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                routineDao.setPinned(routine.id, !routine.isPinned)
-            }
-            showHomepage()
-        }
-    }
-
-    private fun showEditScheduleDialog(routine: RoutineEntity) {
-        val types = arrayOf(
-            getString(R.string.schedule_daily) + " (⏰)",
-            getString(R.string.schedule_weekdays) + " (⏰)",
-            getString(R.string.schedule_every_n_min, 30).toString() + " (🔄)",
-            getString(R.string.schedule_geo_enter_label) + " (📍)"
-        )
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.routine_manage_schedule)
-            .setItems(types) { _, which ->
-                when (which) {
-                    0, 1, 2 -> {
-                        scope.launch {
-                            withContext(Dispatchers.IO) {
-                                val updated = when (which) {
-                                    0 -> routine.copy(
-                                        scheduleEnabled = true, triggerType = "time",
-                                        scheduleHour = 8, scheduleMinute = 0, scheduleRepeatDays = null
-                                    )
-                                    1 -> routine.copy(
-                                        scheduleEnabled = true, triggerType = "time",
-                                        scheduleHour = 8, scheduleMinute = 0, scheduleRepeatDays = "1,2,3,4,5"
-                                    )
-                                    else -> routine.copy(
-                                        scheduleEnabled = true, triggerType = "interval",
-                                        intervalMinutes = 30
-                                    )
-                                }
-                                routineDao.updateRoutine(updated)
-                                com.shiro.tyfo.schedule.ScheduleManager.register(this@ControlPanelActivity, updated)
-                            }
-                            Toast.makeText(this@ControlPanelActivity, R.string.schedule_created, Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                    3 -> showGeofenceSetup(routine)
-                }
-            }
-            .setNegativeButton(R.string.memory_dialog_cancel, null)
-            .show()
-    }
-
-    private var pendingGeofenceRoutine: RoutineEntity? = null
-
-    private fun showGeofenceSetup(routine: RoutineEntity) {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            pendingGeofenceRoutine = routine
-            requestPermissions(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-                REQUEST_LOCATION
-            )
+            editInput.text.clear()
+            forceScrollToEnd = true
             return
         }
-        showGeofenceLocationDialog(routine)
+        if (service.isTaskActive) {
+            confirmReplace(service, text)
+            return
+        }
+        startTask(service, text, replace = false)
     }
 
-    private fun showGeofenceLocationDialog(routine: RoutineEntity) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_save_routine, null)
-        val editName = dialogView.findViewById<EditText>(R.id.edit_routine_name)
-        val editIcon = dialogView.findViewById<EditText>(R.id.edit_routine_icon)
-        val editInstruction = dialogView.findViewById<EditText>(R.id.edit_routine_instruction)
+    private fun confirmReplace(service: AgentService, text: String) {
+        val running = service.currentInstruction.ifBlank { getString(R.string.app_name) }
+        MonetDialogs.builder(this, palette)
+            .setTitle(R.string.replace_task_title)
+            .setMessage(getString(R.string.replace_task_message, running.take(40)))
+            .setPositiveButton(R.string.replace_task_confirm) { _, _ -> startTask(service, text, replace = true) }
+            .setNegativeButton(R.string.memory_dialog_cancel, null)
+            .showTinted(palette)
+    }
 
-        editName.hint = getString(R.string.schedule_geo_location_hint)
-        editName.setText("")
-        editIcon.visibility = View.GONE
-        editInstruction.visibility = View.GONE
-
-        val enterLeaveItems = arrayOf(
-            getString(R.string.schedule_geo_enter_label),
-            getString(R.string.schedule_geo_leave_label)
+    private fun startTask(service: AgentService, text: String, replace: Boolean) {
+        if (!ensureBackendOrSetup(service)) return
+        maybePromptOverlayPermission()
+        ensureServiceStarted()
+        val result = service.startAgent(
+            text,
+            replaceRunning = replace,
+            continueConversationId = viewedConversationId,
         )
-        var triggerOnEnter = true
+        if (result == AgentService.StartResult.BUSY) {
+            confirmReplace(service, text)
+            return
+        }
+        pending = Pending(text, System.currentTimeMillis(), service.lastStartSerial)
+        editInput.text.clear()
+        hideKeyboard()
+        forceScrollToEnd = true
+        render()
+    }
 
-        androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.schedule_geo_pick_title)
-            .setView(dialogView)
-            .setSingleChoiceItems(enterLeaveItems, 0) { _, which ->
-                triggerOnEnter = which == 0
-            }
-            .setPositiveButton(R.string.memory_dialog_save) { _, _ ->
-                val locationName = editName.text.toString().trim()
-                if (locationName.isBlank()) {
-                    Toast.makeText(this, R.string.schedule_geo_name_required, Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                saveGeofenceRoutine(routine, locationName, triggerOnEnter)
+    private fun maybePromptOverlayPermission() {
+        if (overlayPromptShown || android.provider.Settings.canDrawOverlays(this)) return
+        overlayPromptShown = true
+        MonetDialogs.builder(this, palette)
+            .setTitle(R.string.overlay_permission_title)
+            .setMessage(R.string.overlay_permission_message)
+            .setPositiveButton(R.string.overlay_permission_grant) { _, _ ->
+                startActivity(
+                    Intent(
+                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        android.net.Uri.parse("package:$packageName")
+                    )
+                )
             }
             .setNegativeButton(R.string.memory_dialog_cancel, null)
-            .show()
+            .showTinted(palette)
     }
 
-    private fun saveGeofenceRoutine(routine: RoutineEntity, locationName: String, triggerOnEnter: Boolean) {
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                // Use current location if available
-                val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
-                val loc = try {
-                    @Suppress("MissingPermission")
-                    lm.getLastKnownLocation(android.location.LocationManager.FUSED_PROVIDER)
-                        ?: lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
-                        ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-                } catch (_: Exception) { null }
+    private fun hideKeyboard() {
+        editInput.clearFocus()
+        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(editInput.windowToken, 0)
+    }
 
-                val updated = routine.copy(
-                    scheduleEnabled = true,
-                    triggerType = "geofence",
-                    geoLatitude = loc?.latitude,
-                    geoLongitude = loc?.longitude,
-                    geoRadiusMeters = 500f,
-                    geoTriggerOnEnter = triggerOnEnter,
-                    geoLocationName = locationName
-                )
-                routineDao.updateRoutine(updated)
+    /**
+     * 输入框右边只有一颗按钮（同语音助手）：空着是麦克风，聆听时强调色实心并带随声音的光环，有内容就变成发送。
+     */
+    private fun renderMic() {
+        val listening = ::voiceInputController.isInitialized && voiceInputController.isListening
+        val send = editInput.text.isNotBlank()
+        if (listening || send) setMicColors(palette.accent, palette.onAccent)
+        else setMicColors(palette.ghost, palette.text)
+        btnSend.setImageResource(if (send && !listening) R.drawable.ic_assist_send else R.drawable.ic_assist_mic)
+        btnSend.contentDescription = getString(if (send && !listening) R.string.cd_send else R.string.cd_voice_input)
+        micHalo.animate().alpha(if (listening) 1f else 0f).setDuration(220).start()
+    }
 
-                if (loc != null) {
-                    com.shiro.tyfo.schedule.ScheduleManager.register(this@ControlPanelActivity, updated)
-                }
+    /** 按钮底色 / 图标色切换时渐变过去。 */
+    private fun setMicColors(fill: Int, tint: Int) {
+        val target = fill to tint
+        val from = micColors
+        if (target == from) return
+        micColors = target
+        micAnimator?.cancel()
+        if (from == null) {
+            micFill.setColor(fill)
+            btnSend.imageTintList = ColorStateList.valueOf(tint)
+            return
+        }
+        micAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 220
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val k = it.animatedFraction
+                micFill.setColor(AuraPalette.lerpColor(from.first, fill, k))
+                btnSend.imageTintList = ColorStateList.valueOf(AuraPalette.lerpColor(from.second, tint, k))
             }
-            Toast.makeText(this@ControlPanelActivity, R.string.schedule_created, Toast.LENGTH_SHORT).show()
+            start()
         }
     }
 
-    private fun scrollChatToBottom() {
-        if (scrollPending) return
-        scrollPending = true
-        chatRecycler.post {
-            scrollPending = false
-            val count = chatAdapter.itemCount
-            if (count > 0) chatRecycler.smoothScrollToPosition(count - 1)
+    private fun ensureRecordAudioPermission(): Boolean {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            return true
+        }
+        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_RECORD_AUDIO)
+        Toast.makeText(this, R.string.toast_microphone_permission_required, Toast.LENGTH_SHORT).show()
+        return false
+    }
+
+    private fun registerReceivers() {
+        val filter = IntentFilter(VoiceInputTestBridge.ACTION)
+        val demoFilter = IntentFilter("com.shiro.tyfo.TEST")
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(voiceTestReceiver, filter, RECEIVER_NOT_EXPORTED)
+            registerReceiver(demoReceiver, demoFilter, RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(voiceTestReceiver, filter)
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(demoReceiver, demoFilter)
+        }
+        receiversRegistered = true
+    }
+
+    // ── 侧边栏 ───────────────────────────────────────────────────────────
+
+    private fun setupDrawer() {
+        val backCallback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                drawerLayout.closeDrawer(drawer)
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, backCallback)
+        drawerLayout.addDrawerListener(object : DrawerLayout.SimpleDrawerListener() {
+            override fun onDrawerOpened(drawerView: View) {
+                backCallback.isEnabled = true
+            }
+
+            override fun onDrawerClosed(drawerView: View) {
+                backCallback.isEnabled = false
+            }
+
+            override fun onDrawerStateChanged(newState: Int) {
+                if (newState != DrawerLayout.STATE_IDLE) hideKeyboard()
+            }
+        })
+        btnDrawer.setOnClickListener { drawerLayout.openDrawer(drawer) }
+
+        findViewById<View>(R.id.drawer_new_task).setOnClickListener {
+            pending = null
+            showConversation(null)
+            editInput.text.clear()
+            drawerLayout.closeDrawer(drawer)
+        }
+        findViewById<View>(R.id.drawer_memory).setOnClickListener {
+            startActivity(Intent(this, MemoryActivity::class.java))
+            drawerLayout.closeDrawer(drawer, false)
+        }
+        findViewById<View>(R.id.drawer_settings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            drawerLayout.closeDrawer(drawer, false)
+        }
+
+        historyAdapter = DrawerHistoryAdapter(
+            palette,
+            onOpen = { conversation ->
+                if (conversation.id != viewedConversationId) {
+                    pending = null
+                    showConversation(conversation.id)
+                }
+                drawerLayout.closeDrawer(drawer)
+            },
+            onLongPress = { conversation -> confirmDelete(conversation) },
+        )
+        historyAdapter.selectedId = viewedConversationId
+        historyRecycler.layoutManager = LinearLayoutManager(this)
+        historyRecycler.adapter = historyAdapter
+        scope.launch {
+            historyRepo.observeConversations().collect { list ->
+                historyAdapter.submitList(list)
+                drawerEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                // 正在看的会话被删了（比如在别处删的）：回到新任务
+                val viewed = viewedConversationId
+                if (viewed != null && list.none { it.id == viewed }) showConversation(null)
+            }
         }
     }
+
+    private fun confirmDelete(conversation: ConversationEntity) {
+        val service = agentService
+        if (service != null && service.isTaskActive && service.currentConversationId == conversation.id) {
+            Toast.makeText(this, R.string.conversation_delete_running, Toast.LENGTH_SHORT).show()
+            return
+        }
+        MonetDialogs.builder(this, palette)
+            .setTitle(R.string.conversation_delete_title)
+            .setMessage(conversation.title)
+            .setPositiveButton(R.string.conversation_delete_confirm) { _, _ ->
+                scope.launch { historyRepo.deleteConversation(conversation.id) }
+            }
+            .setNegativeButton(R.string.memory_dialog_cancel, null)
+            .showTinted(palette)
+    }
+
+    // ── 小工具 ───────────────────────────────────────────────────────────
+
+    private fun fade(view: View, show: Boolean) {
+        view.animate().cancel()
+        if (show) {
+            view.visibility = View.VISIBLE
+            view.alpha = 0f
+            view.translationY = dp(12).toFloat()
+            view.animate().alpha(1f).translationY(0f).setDuration(260)
+                .setInterpolator(DecelerateInterpolator()).withEndAction(null).start()
+        } else {
+            view.animate().alpha(0f).translationY(dp(8).toFloat()).setDuration(180).withEndAction {
+                view.visibility = View.GONE
+                view.alpha = 1f
+                view.translationY = 0f
+            }.start()
+        }
+    }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 }

@@ -1,67 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Memory list, in the main screen's Monet flat style. Insets and colors are applied in MemoryActivity. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/memory_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/surface"
-    android:fitsSystemWindows="true">
+    android:orientation="vertical">
 
     <LinearLayout
+        android:id="@+id/memory_header"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:orientation="horizontal"
+        android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:paddingHorizontal="16dp"
-        android:background="@drawable/bg_status_bar">
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
 
-        <Button
+        <ImageView
             android:id="@+id/btn_back"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="←"
-            android:textSize="18sp"
-            android:minWidth="44dp"
-            android:textColor="@color/text_back_button" />
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:contentDescription="@string/vd_btn_back"
+            android:padding="13dp"
+            android:src="@drawable/ic_ui_back" />
 
         <TextView
+            android:id="@+id/memory_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
             android:layout_weight="1"
+            android:fontFamily="sans-serif-medium"
             android:text="@string/memory_title"
-            android:textSize="18sp"
-            android:textColor="@color/on_surface"
-            android:fontFamily="sans-serif-medium" />
+            android:textSize="22sp" />
 
-        <Button
+        <ImageView
             android:id="@+id/btn_add_memory"
-            style="?android:attr/buttonBarButtonStyle"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="+"
-            android:textSize="20sp"
-            android:minWidth="44dp"
-            android:textColor="@color/text_back_button" />
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:contentDescription="@string/memory_dialog_add_title"
+            android:padding="12dp"
+            android:src="@drawable/ic_ui_add" />
     </LinearLayout>
-
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@color/surface_overlay_10" />
 
     <EditText
         android:id="@+id/edit_search"
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:layout_margin="16dp"
-        android:background="@drawable/bg_input_field"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="12dp"
         android:hint="@string/memory_search_hint"
+        android:importantForAutofill="no"
         android:inputType="text"
         android:maxLines="1"
-        android:paddingHorizontal="18dp"
-        android:textColor="@color/on_surface"
-        android:textColorHint="@color/on_surface_hint"
-        android:textSize="14sp" />
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:textSize="15sp" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_memories"
@@ -69,6 +66,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:clipToPadding="false"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="16dp" />
+        android:overScrollMode="never"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp" />
 </LinearLayout>
