@@ -141,7 +141,7 @@ class ViewActivity : AppCompatActivity() {
     // 卡片展开时返回手势先收起卡片
     private val collapseOnBack = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
-            collapsePanel()
+            collapsePanel(userInitiated = true)
         }
     }
 
@@ -300,7 +300,7 @@ class ViewActivity : AppCompatActivity() {
         }
 
         fab.setOnClickListener { expandPanel() }
-        btnCollapse.setOnClickListener { collapsePanel() }
+        btnCollapse.setOnClickListener { collapsePanel(userInitiated = true) }
         btnBack.setOnClickListener { onBackToChat() }
         btnTakeover.setOnClickListener { toggleTakeover() }
         btnKeyboard.setOnClickListener { toggleTakeoverKeyboard() }
@@ -401,6 +401,7 @@ class ViewActivity : AppCompatActivity() {
 
     private fun onAgentStateChanged(state: AgentState) {
         Log.d(TAG, "Agent state: $state")
+        val previous = lastAgentState
         lastAgentState = state
         applyGlowForState(state)
         if (state is AgentState.Running && isRealThought(state.thought)) {
@@ -412,7 +413,7 @@ class ViewActivity : AppCompatActivity() {
                 autoExpand()
                 answerInput.requestFocus()
             }
-            state is AgentState.WaitingForHandoff -> autoExpand()
+            state is AgentState.WaitingForHandoff -> if (previous !is AgentState.WaitingForHandoff) autoExpand()
             (state is AgentState.Idle && !state.resultMessage.isNullOrBlank()) || state is AgentState.Error -> autoExpand()
         }
         render()
@@ -420,6 +421,7 @@ class ViewActivity : AppCompatActivity() {
     }
 
     private fun onHandoffUiStateChanged(state: HandoffUiState) {
+        val previous = handoffUi
         handoffUi = state
         when (state) {
             HandoffUiState.Idle -> {
@@ -428,7 +430,9 @@ class ViewActivity : AppCompatActivity() {
                     setTakeoverMode(false)
                 }
             }
-            is HandoffUiState.Active, is HandoffUiState.PendingReturn -> autoExpand()
+            // 接管计时每秒刷新一次状态；只在进入接管 / 进入待交还时自动展开，不然用户收起后马上又弹开
+            is HandoffUiState.Active, is HandoffUiState.PendingReturn ->
+                if (previous.javaClass != state.javaClass) autoExpand()
         }
         render()
         maybeAutoCollapse()
@@ -473,6 +477,12 @@ class ViewActivity : AppCompatActivity() {
             panelDetail.ellipsize = if (readAll) null else TextUtils.TruncateAt.END
             panelDetail.maxLines = if (readAll) 8 else 3
         }
+        val detailMaxLines = when {
+            !readAll -> 3
+            handoff -> 5
+            else -> 8
+        }
+        if (panelDetail.maxLines != detailMaxLines) panelDetail.maxLines = detailMaxLines
         if (panelDetail.text.toString() != detail) {
             panelDetail.text = detail
             panelDetail.scrollTo(0, 0)
@@ -512,7 +522,7 @@ class ViewActivity : AppCompatActivity() {
         // 接管中这颗按钮是“当前状态”，用强调色实心标出来
         if (isTakeoverMode) styleButton(btnTakeover, palette.accent, palette.onAccent)
         else styleButton(btnTakeover, palette.tonalButton, palette.onTonalButton)
-        btnCollapse.visibility = if (handoff) View.INVISIBLE else View.VISIBLE
+        btnCollapse.visibility = View.VISIBLE
         // 接管时返回按钮正好压在画面里 App 自己的返回箭头上，先藏起来
         val showBack = !isTakeoverMode
         if (showBack != (btnBack.tag != false)) {
@@ -531,7 +541,7 @@ class ViewActivity : AppCompatActivity() {
     }
 
     private fun syncBackCallback() {
-        collapseOnBack.isEnabled = controlPanel.isExpanded && !isInHandoff()
+        collapseOnBack.isEnabled = controlPanel.isExpanded
     }
 
     private fun compactLine(s: AgentState?, handoff: Boolean): String = when {
@@ -720,8 +730,9 @@ class ViewActivity : AppCompatActivity() {
         if (autoExpanded && lastAgentState is AgentState.Running && !isInHandoff()) collapsePanel()
     }
 
-    private fun collapsePanel() {
-        if (!controlPanel.isExpanded || isInHandoff()) return
+    /** 接管中卡片默认保持展开（说明和“交还”按钮要看得到），但用户自己点收起要能收起，好腾出画面去操作。 */
+    private fun collapsePanel(userInitiated: Boolean = false) {
+        if (!controlPanel.isExpanded || (isInHandoff() && !userInitiated)) return
         autoExpanded = false
         if (voiceAnswerController.isListening) voiceAnswerController.stop()
         hideInputKeyboard()
@@ -795,7 +806,7 @@ class ViewActivity : AppCompatActivity() {
             val vdm = agentService?.getVirtualDisplayManager() ?: return super.dispatchKeyEvent(event)
             val displayId = vdm.displayId
             if (displayId != -1) {
-                val result = InputInjector.injectKeyToDisplay(this, event, displayId)
+                val result = InputInjector.injectKeyToDisplay(this, event, displayId, agentService?.privilegeBackend)
                 if (result) return true
             }
         }
@@ -930,7 +941,7 @@ class ViewActivity : AppCompatActivity() {
                 setScale(vdm.width.toFloat() / surfaceView.width, vdm.height.toFloat() / surfaceView.height)
             })
         }
-        val result = InputInjector.injectToDisplay(this, injected, displayId)
+        val result = InputInjector.injectToDisplay(this, injected, displayId, agentService?.privilegeBackend)
         Log.d(TAG, "Injected touch to display $displayId: result=$result action=${event.action} x=${event.x} y=${event.y}")
         injected.recycle()
     }
@@ -951,19 +962,26 @@ class ViewActivity : AppCompatActivity() {
                         InputInjector.injectKeyToDisplay(
                             this@ViewActivity,
                             KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL),
-                            displayId
+                            displayId,
+                            agentService?.privilegeBackend
                         )
                         InputInjector.injectKeyToDisplay(
                             this@ViewActivity,
                             KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL),
-                            displayId
+                            displayId,
+                            agentService?.privilegeBackend
                         )
                     }
                 }
                 if (inserted.isNotEmpty()) {
                     Log.i(TAG, "Takeover keyboard proxy forwarding text: ${inserted.length} chars")
                     lifecycleScope.launch {
-                        InputInjector(this@ViewActivity, displayId).typeText(inserted)
+                        val backend = agentService?.privilegeBackend
+                        if (backend != null) {
+                            InputInjector(this@ViewActivity, displayId, backend = backend).typeText(inserted)
+                        } else {
+                            InputInjector(this@ViewActivity, displayId).typeText(inserted)
+                        }
                     }
                 }
             }

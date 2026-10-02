@@ -176,6 +176,10 @@ class AgentService : Service() {
     val activeBackendName: String?
         get() = backend?.capabilities?.name
 
+    /** 当前特权后端；接管时预览画面要用它把触控 / 按键转发到虚拟屏。 */
+    val privilegeBackend: PrivilegeBackend?
+        get() = backend
+
     /** Disconnect the privilege backend. The user can reconnect later from the setup flow. */
     fun revokeBackend() {
         backend?.destroy()

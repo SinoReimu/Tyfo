@@ -55,7 +55,21 @@ class InputInjector(
          * Used by ViewActivity for TAKEOVER touch forwarding.
          * Coordinates are 1:1 since VD matches physical display resolution.
          */
-        fun injectToDisplay(context: Context, event: MotionEvent, targetDisplayId: Int): Boolean {
+        fun injectToDisplay(
+            context: Context,
+            event: MotionEvent,
+            targetDisplayId: Int,
+            backend: PrivilegeBackend? = null
+        ): Boolean {
+            if (backend != null) {
+                event.source = InputDevice.SOURCE_TOUCHSCREEN
+                return try {
+                    backend.injectInputEvent(event, targetDisplayId, INJECT_MODE_ASYNC)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to inject event to display $targetDisplayId via backend", e)
+                    false
+                }
+            }
             return try {
                 // Get InputManager instance
                 val im = context.getSystemService(Context.INPUT_SERVICE)
@@ -88,7 +102,20 @@ class InputInjector(
          * Inject a KeyEvent to a specific display.
          * Used by ViewActivity in TAKEOVER mode to forward keyboard input to VD.
          */
-        fun injectKeyToDisplay(context: Context, event: KeyEvent, targetDisplayId: Int): Boolean {
+        fun injectKeyToDisplay(
+            context: Context,
+            event: KeyEvent,
+            targetDisplayId: Int,
+            backend: PrivilegeBackend? = null
+        ): Boolean {
+            if (backend != null) {
+                return try {
+                    backend.injectInputEvent(KeyEvent(event), targetDisplayId, INJECT_MODE_ASYNC)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to inject key event to display $targetDisplayId via backend", e)
+                    false
+                }
+            }
             return try {
                 val im = context.getSystemService(Context.INPUT_SERVICE)
                     ?: Class.forName("android.hardware.input.InputManager")
