@@ -24,7 +24,7 @@ object ConversationContext {
         fun closeTurn() {
             if (lines.isEmpty()) return
             if (!hasOutcome && lastProgress != null) {
-                lines.add(label("ctx_progress") + lastProgress)
+                lines.add(AgentPrompts.CTX_PROGRESS + lastProgress)
             }
             turns.add(lines.joinToString("\n"))
             lines = mutableListOf()
@@ -39,19 +39,19 @@ object ConversationContext {
             when (type) {
                 MessageType.USER_INPUT -> {
                     closeTurn()
-                    lines.add(label("ctx_user") + text)
+                    lines.add(AgentPrompts.CTX_USER + text)
                 }
-                MessageType.AGENT_QUESTION -> lines.add(label("ctx_asked") + text)
-                MessageType.USER_ANSWER -> lines.add(label("ctx_answered") + text)
-                MessageType.USER_SUPPLEMENT -> lines.add(label("ctx_added") + text)
+                MessageType.AGENT_QUESTION -> lines.add(AgentPrompts.CTX_ASKED + text)
+                MessageType.USER_ANSWER -> lines.add(AgentPrompts.CTX_ANSWERED + text)
+                MessageType.USER_SUPPLEMENT -> lines.add(AgentPrompts.CTX_ADDED + text)
                 MessageType.AGENT_STATUS -> lastProgress = text
                 MessageType.AGENT_RESULT -> {
-                    lines.add(label("ctx_result") + text.replace(RESULT_MARKER, ""))
+                    lines.add(AgentPrompts.CTX_RESULT + text.replace(RESULT_MARKER, ""))
                     hasOutcome = true
                 }
                 // 停止 / 系统提示：这一轮没做完
                 MessageType.SYSTEM -> if (lines.isNotEmpty() && !hasOutcome) {
-                    lines.add(label("ctx_stopped") + text)
+                    lines.add(AgentPrompts.CTX_STOPPED + text)
                     hasOutcome = true
                 }
                 MessageType.AGENT_DEBUG, MessageType.AGENT_CYCLE -> Unit
@@ -71,10 +71,8 @@ object ConversationContext {
         }
         val omitted = kept.size < turns.size
         return buildString {
-            if (omitted) append(label("ctx_omitted")).append("\n\n")
+            if (omitted) append(AgentPrompts.CTX_OMITTED).append("\n\n")
             append(kept.joinToString("\n\n"))
         }
     }
-
-    private fun label(key: String): String = LlmPrompts.agentFeedback(key)
 }

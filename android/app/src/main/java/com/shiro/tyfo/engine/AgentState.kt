@@ -2,7 +2,11 @@ package com.shiro.tyfo.engine
 
 sealed class AgentState {
     data class Idle(val resultMessage: String? = null) : AgentState()
-    data class Running(val step: Int, val thought: String) : AgentState()
+    /**
+     * [partial]：旁白还在流式生成，[thought] 只是目前为止的半句。界面可以逐字显示；
+     * 通知、聊天记录这类一条一条发的，只取生成完的（partial = false）。
+     */
+    data class Running(val step: Int, val thought: String, val partial: Boolean = false) : AgentState()
     object Paused : AgentState()
     data class Error(val message: String) : AgentState()
     data class WaitingForUser(val question: String, val step: Int) : AgentState()

@@ -3,7 +3,7 @@ package com.shiro.tyfo.engine
 import com.shiro.tyfo.action.Action
 import com.shiro.tyfo.action.ActionExecutor
 import com.shiro.tyfo.capture.ScreenCapture
-import com.shiro.tyfo.fixtures.FakeLlmClient
+import com.shiro.tyfo.fixtures.FakeModelClient
 import com.shiro.tyfo.fixtures.buildAskUserResponse
 import com.shiro.tyfo.fixtures.buildFinishResponse
 import com.shiro.tyfo.fixtures.buildOpenAppResponse
@@ -27,7 +27,7 @@ class AgentEngineTest {
     fun setUp() {
         mockkObject(ScreenCapture)
         every { ScreenCapture.captureBase64() } returns FAKE_SCREENSHOT
-        every { ScreenCapture.captureBase64(any(), any()) } returns FAKE_SCREENSHOT
+        every { ScreenCapture.captureBase64(any(), any(), any(), any()) } returns FAKE_SCREENSHOT
     }
 
     @After
@@ -75,31 +75,6 @@ class AgentEngineTest {
         assertSame(AgentState.Paused, AgentState.Paused)
     }
 
-    // --- SIDE_EFFECT_ACTIONS tests ---
-
-    @Test
-    fun `side-effect actions include all mutating action types`() {
-        val sideEffects = AgentEngine.SIDE_EFFECT_ACTIONS
-        assertTrue("tap" in sideEffects)
-        assertTrue("swipe" in sideEffects)
-        assertTrue("type_text" in sideEffects)
-        assertTrue("key_event" in sideEffects)
-        assertTrue("open_app" in sideEffects)
-        assertTrue("long_press" in sideEffects)
-    }
-
-    @Test
-    fun `non-mutating actions are not side-effects`() {
-        val sideEffects = AgentEngine.SIDE_EFFECT_ACTIONS
-        assertFalse("wait" in sideEffects)
-        assertFalse("note" in sideEffects)
-        assertFalse("finish" in sideEffects)
-        assertFalse("fail" in sideEffects)
-        assertFalse("ask_user" in sideEffects)
-        assertFalse("handoff_user" in sideEffects)
-        assertFalse("remember" in sideEffects)
-    }
-
     // --- StepResult tests ---
 
     @Test
@@ -124,29 +99,7 @@ class AgentEngineTest {
         assertTrue(result.completed)
     }
 
-    // --- System prompt tests ---
-
-    @Test
-    fun `system prompt contains coordinate system description`() {
-        val prompt = AgentEngine.SYSTEM_PROMPT
-        assertTrue(prompt.contains("0") && prompt.contains("1000"))
-        assertTrue(prompt.contains("坐标") || prompt.contains("coordinate") || prompt.contains("Coordinate"))
-    }
-
-    @Test
-    fun `system prompt contains all action types`() {
-        val prompt = AgentEngine.SYSTEM_PROMPT
-        for (actionType in listOf("tap", "swipe", "type_text", "key_event", "open_app", "wait", "finish", "fail", "ask_user")) {
-            assertTrue("Should mention $actionType", prompt.contains(actionType))
-        }
-    }
-
-    @Test
-    fun `system prompt mentions ask_user with question parameter`() {
-        assertTrue(AgentEngine.SYSTEM_PROMPT.contains("ask_user(question)"))
-    }
-
-    // --- Engine integration tests with FakeLlmClient + MockK ---
+    // --- Engine integration tests with FakeModelClient + MockK ---
 
     @Test
     fun `engine starts in Idle state`() {
@@ -157,12 +110,12 @@ class AgentEngineTest {
 
     @Test
     fun `engine with finish-only response completes`() = runTest {
-        val fakeLlm = FakeLlmClient()
+        val fakeLlm = FakeModelClient()
         fakeLlm.enqueue(buildFinishResponse("done"))
 
         val actionExecutor = mockk<ActionExecutor>(relaxed = true)
         val engine = AgentEngine(
-            llmClient = fakeLlm,
+            model = fakeLlm,
             actionExecutor = actionExecutor,
             maxSteps = 10
         )
@@ -179,7 +132,7 @@ class AgentEngineTest {
 
     @Test
     fun `engine respects maxSteps limit`() = runTest {
-        val fakeLlm = FakeLlmClient()
+        val fakeLlm = FakeModelClient()
         // Queue more tap responses than maxSteps allows
         repeat(10) { fakeLlm.enqueue(buildTapResponse(500, 500)) }
 
@@ -190,7 +143,7 @@ class AgentEngineTest {
         )
 
         val engine = AgentEngine(
-            llmClient = fakeLlm,
+            model = fakeLlm,
             actionExecutor = actionExecutor,
             maxSteps = 3
         )
@@ -203,11 +156,11 @@ class AgentEngineTest {
 
     @Test
     fun `takeover while asking keeps the question after resume`() = runTest {
-        val fakeLlm = FakeLlmClient()
+        val fakeLlm = FakeModelClient()
         fakeLlm.enqueue(buildAskUserResponse("continue?"))
         fakeLlm.enqueue(buildFinishResponse("done"))
         val engine = AgentEngine(
-            llmClient = fakeLlm,
+            model = fakeLlm,
             actionExecutor = mockk(relaxed = true),
             maxSteps = 10
         )
@@ -235,12 +188,12 @@ class AgentEngineTest {
     }
 
     private fun createEngine(
-        fakeLlm: FakeLlmClient = FakeLlmClient(),
+        fakeLlm: FakeModelClient = FakeModelClient(),
         maxSteps: Int = 100
     ): AgentEngine {
         val actionExecutor = mockk<ActionExecutor>(relaxed = true)
         return AgentEngine(
-            llmClient = fakeLlm,
+            model = fakeLlm,
             actionExecutor = actionExecutor,
             maxSteps = maxSteps
         )

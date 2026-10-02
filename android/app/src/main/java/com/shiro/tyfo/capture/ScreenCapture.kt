@@ -31,22 +31,37 @@ object ScreenCapture {
      * Capture a specific display and return as base64 JPEG.
      * @param displayId 0 for physical display, or a virtual display ID
      * @param virtualDisplayBitmap Optional pre-captured bitmap from VirtualDisplayManager
+     * @param maxWidth scale down to at most this width (the model's screenshot size)
+     * @param quality JPEG quality
      */
-    fun captureBase64(displayId: Int = 0, virtualDisplayBitmap: Bitmap? = null): String? {
-        val bytes = captureJpegBytes(displayId, virtualDisplayBitmap) ?: return null
+    fun captureBase64(
+        displayId: Int = 0,
+        virtualDisplayBitmap: Bitmap? = null,
+        maxWidth: Int = DEFAULT_MAX_WIDTH,
+        quality: Int = DEFAULT_QUALITY,
+    ): String? {
+        val bytes = captureJpegBytes(displayId, virtualDisplayBitmap, maxWidth, quality) ?: return null
         return Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
-    fun captureJpegBytes(displayId: Int = 0, virtualDisplayBitmap: Bitmap? = null): ByteArray? {
+    fun captureJpegBytes(
+        displayId: Int = 0,
+        virtualDisplayBitmap: Bitmap? = null,
+        maxWidth: Int = DEFAULT_MAX_WIDTH,
+        quality: Int = DEFAULT_QUALITY,
+    ): ByteArray? {
         if (virtualDisplayBitmap != null) {
             return try {
-                ImageUtil.processScreenshotToBytes(virtualDisplayBitmap)
+                ImageUtil.processScreenshotToBytes(virtualDisplayBitmap, maxWidth, quality)
             } finally {
                 if (!virtualDisplayBitmap.isRecycled) virtualDisplayBitmap.recycle()
             }
         }
-        return backend.captureScreen(displayId, 540, 85)
+        return backend.captureScreen(displayId, maxWidth, quality)
     }
+
+    private const val DEFAULT_MAX_WIDTH = 540
+    private const val DEFAULT_QUALITY = 85
 
     /**
      * Capture a specific display as a Bitmap.

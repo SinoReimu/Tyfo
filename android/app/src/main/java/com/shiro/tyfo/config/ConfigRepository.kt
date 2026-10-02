@@ -25,30 +25,17 @@ class ConfigRepository(context: Context) {
         private const val KEY_FEISHU_TARGET_CHAT_ID = "feishu_target_chat_id"
         private const val KEY_BLACKLISTED_PACKAGES = "blacklisted_packages"
 
-        const val PROVIDER_OPENAI = "openai"
-        const val PROVIDER_ANTHROPIC = "anthropic"
-        const val PROVIDER_OLLAMA = "ollama"
-        const val PROVIDER_KIMI = "kimi"
-        const val DEFAULT_MODEL = "gpt-5.5"
-        const val DEFAULT_BASE_URL = "https://api.openai.com/v1"
-        const val DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-7-20250415"
-        const val DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com"
-        const val DEFAULT_OLLAMA_MODEL = "gemma4:26b-a4b-it-q4_K_M"
-        const val DEFAULT_OLLAMA_BASE_URL = "https://localhost:11434"
-        const val DEFAULT_KIMI_MODEL = "kimi-k2.6"
-        const val DEFAULT_KIMI_BASE_URL = "https://api.moonshot.cn/v1"
+        /**
+         * 模型服务的协议。目前只支持火山方舟；加服务商时在这里加一个值，
+         * 并在 AgentService.createModelClient 里分派到对应的适配器。
+         */
+        const val PROVIDER_ARK = "ark"
+        val SUPPORTED_PROVIDERS = listOf(PROVIDER_ARK)
+
+        /** 首次运行的默认配置；API Key 来自 local.properties（BuildConfig.PRESET_API_KEY）。 */
+        const val DEFAULT_MODEL = "ark-code-latest"
+        const val DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/plan/v3"
         const val DEFAULT_MAX_STEPS = 100
-
-        const val PRESET_PROVIDER = PROVIDER_OPENAI
-        const val PRESET_MODEL = "ark-code-latest"
-        const val PRESET_BASE_URL = "https://ark.cn-beijing.volces.com/api/plan/v3"
-
-        /** Returns true if model or url matches any known provider default.
-         *  SettingsActivity uses this to decide whether to auto-fill defaults when
-         *  the provider spinner changes. */
-        fun isDefaultModelOrUrl(model: String, url: String): Boolean =
-            model in listOf(DEFAULT_MODEL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OLLAMA_MODEL, DEFAULT_KIMI_MODEL) ||
-            url in listOf(DEFAULT_BASE_URL, DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OLLAMA_BASE_URL, DEFAULT_KIMI_BASE_URL)
     }
 
     private val prefs: SharedPreferences =
@@ -58,11 +45,14 @@ class ConfigRepository(context: Context) {
         // Seed on first run; otherwise SettingsFragment persists the XML defaultValues first.
         if (!prefs.contains(KEY_API_PROVIDER)) {
             prefs.edit()
-                .putString(KEY_API_PROVIDER, PRESET_PROVIDER)
+                .putString(KEY_API_PROVIDER, PROVIDER_ARK)
                 .putString(KEY_API_KEY, com.shiro.tyfo.BuildConfig.PRESET_API_KEY)
-                .putString(KEY_MODEL, PRESET_MODEL)
-                .putString(KEY_BASE_URL, PRESET_BASE_URL)
+                .putString(KEY_MODEL, DEFAULT_MODEL)
+                .putString(KEY_BASE_URL, DEFAULT_BASE_URL)
                 .apply()
+        } else if (prefs.getString(KEY_API_PROVIDER, null) !in SUPPORTED_PROVIDERS) {
+            // 以前的 openai / anthropic / ollama / kimi 配置：协议都改成方舟，端点、Key、模型保留
+            prefs.edit().putString(KEY_API_PROVIDER, PROVIDER_ARK).apply()
         }
     }
 
@@ -79,7 +69,7 @@ class ConfigRepository(context: Context) {
 
     fun applyProfile(provider: String, apiKey: String, model: String, baseUrl: String, profileName: String) {
         prefs.edit()
-            .putString(KEY_API_PROVIDER, provider)
+            .putString(KEY_API_PROVIDER, provider.takeIf { it in SUPPORTED_PROVIDERS } ?: PROVIDER_ARK)
             .putString(KEY_API_KEY, apiKey)
             .putString(KEY_MODEL, model)
             .putString(KEY_BASE_URL, baseUrl)
@@ -87,9 +77,10 @@ class ConfigRepository(context: Context) {
             .apply()
     }
 
+    /** 模型服务的协议，取值见 [SUPPORTED_PROVIDERS]；不认识的值当作方舟。 */
     var apiProvider: String
-        get() = prefs.getString(KEY_API_PROVIDER, PROVIDER_OPENAI) ?: PROVIDER_OPENAI
-        set(value) = prefs.edit().putString(KEY_API_PROVIDER, value).apply()
+        get() = prefs.getString(KEY_API_PROVIDER, PROVIDER_ARK)?.takeIf { it in SUPPORTED_PROVIDERS } ?: PROVIDER_ARK
+        set(value) = prefs.edit().putString(KEY_API_PROVIDER, value.takeIf { it in SUPPORTED_PROVIDERS } ?: PROVIDER_ARK).apply()
 
     var apiKey: String
         get() = prefs.getString(KEY_API_KEY, "") ?: ""

@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
@@ -44,10 +45,14 @@ import com.shiro.tyfo.engine.HandoffVisualDetector
 import com.shiro.tyfo.engine.ScreenFingerprint
 import com.shiro.tyfo.engine.StepResult
 import com.shiro.tyfo.engine.isTaskActive
-import com.shiro.tyfo.llm.AnthropicClient
-import com.shiro.tyfo.llm.LLMClient
-import com.shiro.tyfo.llm.LLMClientInterface
-import com.shiro.tyfo.llm.OllamaClient
+import com.shiro.tyfo.engine.AgentPrompts
+import com.shiro.tyfo.llm.ArkClient
+import com.shiro.tyfo.llm.LlmMessage
+import com.shiro.tyfo.llm.LlmReply
+import com.shiro.tyfo.llm.ModelClient
+import com.shiro.tyfo.llm.ReplyListener
+import com.shiro.tyfo.llm.ToolCall
+import com.shiro.tyfo.llm.ToolSpec
 import com.shiro.tyfo.overlay.OverlayStatePolicy
 import com.shiro.tyfo.ui.MessageType
 import kotlinx.coroutines.CancellationException
@@ -107,7 +112,7 @@ class AgentService : Service() {
     private class TaskStart(
         val conversationId: Long,
         val summary: String?,
-        val history: List<Map<String, Any>>,
+        val history: List<LlmMessage>,
     )
 
     /** [startAgent] 的受理结果。 */
@@ -541,28 +546,7 @@ class AgentService : Service() {
         releaseAgentWakeLock()
 
         Log.i(TAG, "startAgent config: provider=${config.apiProvider} model=${config.model} baseUrl=${config.baseUrl} key=${config.apiKey.take(10)}...")
-        val llmTemperature = when (config.apiProvider) {
-            ConfigRepository.PROVIDER_KIMI -> 0.6
-            else -> 0.1
-        }
-        val llmClient: LLMClientInterface = when (config.apiProvider) {
-            ConfigRepository.PROVIDER_ANTHROPIC -> AnthropicClient(
-                apiKey = config.apiKey,
-                model = config.model,
-                baseUrl = config.baseUrl
-            )
-            ConfigRepository.PROVIDER_OLLAMA -> OllamaClient(
-                model = config.model,
-                baseUrl = config.baseUrl
-            )
-            else -> LLMClient(
-                apiKey = config.apiKey,
-                model = config.model,
-                baseUrl = config.baseUrl,
-                temperature = llmTemperature,
-                disableThinking = config.apiProvider == ConfigRepository.PROVIDER_KIMI
-            )
-        }
+        val llmClient = createModelClient()
 
         // 在主线程上串行地准备虚拟屏和引擎：stopAgent / 替换任务也在主线程，取消 startJob 就能干净地作废这次启动
         startJob = scope.launch(Dispatchers.Main) {
@@ -629,12 +613,14 @@ class AgentService : Service() {
                 vdm,
                 config.debugMode,
                 memoryRepo,
-                viewTreeProvider = { displayId, w, h ->
-                    VdAccessibilityService.captureViewTree(displayId, w, h)
+                environment = taskEnvironment(vdm),
+                elementsProvider = { displayId, w, h ->
+                    VdAccessibilityService.captureElements(displayId, w, h)
                 },
                 shouldForwardScreenshot = { config.imSendStepScreenshots },
                 blacklistedPackages = config.blacklistedPackages,
                 isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive },
+                maxStepsMessage = { getString(R.string.task_max_steps, it) },
                 onTranscript = { transcript ->
                     scope.launch(historyWriter) {
                         runCatching { historyRepo.saveSessionHistory(convId, SessionHistory.encode(transcript)) }
@@ -822,12 +808,28 @@ class AgentService : Service() {
         }
     }
 
-    private class DebugLLMClient : LLMClientInterface {
-        override suspend fun chatWithTools(messages: List<Map<String, Any>>): Map<String, Any?> =
-            mapOf(
-                "action_type" to "wait",
-                "thought" to "debug wait",
-            )
+    /** 按配置创建模型服务的适配器。目前只有方舟；加服务商时在这里按 [ConfigRepository.apiProvider] 分派。 */
+    private fun createModelClient(): ModelClient = ArkClient(
+        apiKey = config.apiKey,
+        model = config.model,
+        baseUrl = config.baseUrl.trimEnd('/'),
+    )
+
+    /** 写进系统提示词的设备和时间信息。 */
+    private fun taskEnvironment(vdm: VirtualDisplayManager) = AgentPrompts.Environment(
+        device = listOf(Build.MANUFACTURER, Build.MODEL).filter { !it.isNullOrBlank() }.joinToString(" ")
+            .ifBlank { null },
+        android = Build.VERSION.RELEASE,
+        screenWidth = vdm.width,
+        screenHeight = vdm.height,
+        now = java.time.ZonedDateTime.now(),
+    )
+
+    private class DebugModelClient : ModelClient {
+        override val profile = ArkClient("", "debug", "").profile
+
+        override suspend fun chat(messages: List<LlmMessage>, tools: List<ToolSpec>, listener: ReplyListener?): LlmReply =
+            LlmReply("debug wait", listOf(ToolCall("debug", "wait", "{}")))
 
         override fun shutdown() {}
     }
@@ -867,7 +869,7 @@ class AgentService : Service() {
 
         val displaySize = Point(vdm.width, vdm.height)
         val newEngine = AgentEngine(
-            DebugLLMClient(),
+            DebugModelClient(),
             ActionExecutor(
                 this,
                 vdm.displayId,
@@ -883,8 +885,8 @@ class AgentService : Service() {
             vdm,
             debugMode = true,
             memoryRepository = memoryRepo,
-            viewTreeProvider = { displayId, w, h ->
-                VdAccessibilityService.captureViewTree(displayId, w, h)
+            elementsProvider = { displayId, w, h ->
+                VdAccessibilityService.captureElements(displayId, w, h)
             },
             blacklistedPackages = config.blacklistedPackages,
             isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive }
@@ -1174,8 +1176,8 @@ class AgentService : Service() {
 
                 if (result.completed) {
                     val summary = when (result.actionType) {
-                        // 完成时模型的 thought 就是给用户的答案，直接展示；✅ / ❌ / ⚠️ 是给界面认状态用的标记
-                        "finish" -> "✅ ${result.thought.ifBlank { getString(R.string.task_complete_step, result.step) }}"
+                        // 完成时 detail 是模型给用户的答案（finish 的 answer），直接展示；✅ / ❌ / ⚠️ 是给界面认状态用的标记
+                        "finish" -> "✅ ${result.detail.ifBlank { getString(R.string.task_complete_step, result.step) }}"
                         "fail" -> "❌ ${getString(R.string.task_failed, result.detail.removePrefix("Task failed: "))}"
                         "max_steps" -> "⚠️ ${getString(R.string.task_max_steps, result.step)}"
                         "error" -> "❌ ${getString(R.string.task_error, result.detail)}"
@@ -1712,6 +1714,8 @@ class AgentService : Service() {
                 val detail: String
                 when (state) {
                     is AgentState.Running -> {
+                        // 旁白流式生成中的半句不发通知，等这一步的完整旁白
+                        if (state.partial) return@collect
                         phase = ProgressPhase.RUNNING
                         val t = state.thought.trim()
                         // 引擎内部的占位文案（截图中 / 思考中 / 执行中）不展示

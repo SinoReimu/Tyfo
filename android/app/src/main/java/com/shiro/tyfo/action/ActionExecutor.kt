@@ -59,7 +59,7 @@ class ActionExecutor(
                 }
 
                 is Action.LongPress -> {
-                    val ok = inputInjector.longPress(action.x, action.y)
+                    val ok = inputInjector.longPress(action.x, action.y, action.durationMs)
                     ok to "Long pressed at (${action.x}, ${action.y})"
                 }
 
@@ -95,41 +95,21 @@ class ActionExecutor(
                 }
 
                 is Action.TypeText -> {
-                    val ok = inputInjector.typeText(action.text)
-                    ok to "Typed: ${action.text}"
+                    val typed = inputInjector.typeText(action.text)
+                    when {
+                        !typed -> false to "Typing failed: ${action.text}"
+                        !action.submit -> true to "Typed: ${action.text}"
+                        else -> {
+                            delay(150)
+                            if (inputInjector.keyEvent("enter")) true to "Typed: ${action.text} + enter"
+                            else false to "Typed: ${action.text}, but pressing enter failed"
+                        }
+                    }
                 }
 
                 is Action.Wait -> {
-                    delay(2000)
-                    true to "Waited 2s"
-                }
-
-                is Action.Finish -> {
-                    true to "Task finished"
-                }
-
-                is Action.Fail -> {
-                    false to "Task failed: ${action.reason}"
-                }
-
-                is Action.AskUser -> {
-                    // Intercepted by AgentEngine before reaching here
-                    true to "Asking user: ${action.question}"
-                }
-
-                is Action.HandoffUser -> {
-                    // Intercepted by AgentEngine before reaching here
-                    true to "Handing off to user: ${action.reason}"
-                }
-
-                is Action.Note -> {
-                    // Intercepted by AgentEngine before reaching here
-                    true to "Note: ${action.note}"
-                }
-
-                is Action.Remember -> {
-                    // Intercepted by AgentEngine before reaching here
-                    true to "Remembered: ${action.key}"
+                    delay(action.seconds * 1000L)
+                    true to "Waited ${action.seconds}s"
                 }
 
                 is Action.ListApps -> {

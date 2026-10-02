@@ -6,13 +6,14 @@ import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.shiro.tyfo.tools.UiElement
 
 class VdAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val TAG = "VdA11yService"
-        private const val MAX_DEPTH = 15
-        private const val MAX_NODES = 200
+        private const val MAX_DEPTH = 30
+        private const val MAX_NODES = 400
 
         @Volatile
         var instance: VdAccessibilityService? = null
@@ -27,8 +28,12 @@ class VdAccessibilityService : AccessibilityService() {
             }
         }
 
-        fun captureViewTree(displayId: Int, displayWidth: Int, displayHeight: Int): String? {
-            return instance?.captureViewTreeInternal(displayId, displayWidth, displayHeight)
+        /**
+         * 这块屏幕上可见的界面元素，边界是设备像素（裁到屏幕内）。无障碍服务没连上或拿不到窗口时返回 null。
+         * 包括纯布局容器，筛选交给 [com.shiro.tyfo.tools.ScreenOutline]。
+         */
+        fun captureElements(displayId: Int, displayWidth: Int, displayHeight: Int): List<UiElement>? {
+            return instance?.captureElementsInternal(displayId, displayWidth, displayHeight)
         }
 
         fun getTopPackageOnDisplay(displayId: Int): String? {
@@ -91,9 +96,9 @@ class VdAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun captureViewTreeInternal(
+    private fun captureElementsInternal(
         displayId: Int, displayWidth: Int, displayHeight: Int
-    ): String? {
+    ): List<UiElement>? {
         return try {
             val windowsMap = windows?.takeIf { displayId == 0 }
                 ?: try {
@@ -111,96 +116,66 @@ class VdAccessibilityService : AccessibilityService() {
                 return null
             }
 
-            val sb = StringBuilder()
-            var nodeCount = 0
-
+            val out = mutableListOf<UiElement>()
             for (window in windowsMap) {
                 val root = window.getRoot(AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_HYBRID)
                     ?: continue
-
                 val packageName = root.packageName?.toString() ?: ""
                 if (packageName == "com.android.systemui") {
                     root.recycle()
                     continue
                 }
-
-                traverseNode(root, 0, sb, displayWidth, displayHeight,
-                    nodeCount = { nodeCount }, incCount = { nodeCount++ })
+                collect(root, 0, out, displayWidth, displayHeight)
                 root.recycle()
             }
-
-            if (sb.isEmpty()) null else sb.toString().trimEnd()
+            out
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to capture view tree", e)
+            Log.e(TAG, "Failed to capture elements", e)
             null
         }
     }
 
-    private fun traverseNode(
+    private fun collect(
         node: AccessibilityNodeInfo,
         depth: Int,
-        sb: StringBuilder,
+        out: MutableList<UiElement>,
         displayWidth: Int,
         displayHeight: Int,
-        nodeCount: () -> Int,
-        incCount: () -> Unit,
     ) {
-        if (depth > MAX_DEPTH || nodeCount() >= MAX_NODES) return
+        if (depth > MAX_DEPTH || out.size >= MAX_NODES) return
         if (!node.isVisibleToUser) return
-
-        val text = node.text?.toString()?.take(50)
-        val desc = node.contentDescription?.toString()?.take(50)
-        val className = node.className?.toString()?.substringAfterLast('.') ?: ""
-
-        val isClickable = node.isClickable
-        val isEditable = node.isEditable
-        val isScrollable = node.isScrollable
-        val isCheckable = node.isCheckable
-        val isChecked = node.isChecked
-
-        val hasContent = !text.isNullOrBlank() || !desc.isNullOrBlank()
-        val isInteractive = isClickable || isEditable || isScrollable || isCheckable
-
-        // Skip leaf nodes with no content and no interactivity
-        val childCount = node.childCount
-        if (!hasContent && !isInteractive && childCount == 0) return
-
-        incCount()
 
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
-
-        // Normalize to 0-1000 range
-        val nx1 = (bounds.left * 1000 / displayWidth).coerceIn(0, 1000)
-        val ny1 = (bounds.top * 1000 / displayHeight).coerceIn(0, 1000)
-        val nx2 = (bounds.right * 1000 / displayWidth).coerceIn(0, 1000)
-        val ny2 = (bounds.bottom * 1000 / displayHeight).coerceIn(0, 1000)
-
-        // Only emit line if this node has content or is interactive
-        if (hasContent || isInteractive) {
-            val indent = "  ".repeat(depth)
-
-            sb.append(indent).append(className)
-
-            if (!text.isNullOrBlank()) sb.append(" \"$text\"")
-            if (!desc.isNullOrBlank() && desc != text) sb.append(" ($desc)")
-
-            val attrs = mutableListOf<String>()
-            if (isEditable) attrs.add("editable")
-            if (isScrollable) attrs.add("scrollable")
-            if (isCheckable) attrs.add(if (isChecked) "checked" else "unchecked")
-            if (isClickable && !isEditable) attrs.add("clickable")
-            if (attrs.isNotEmpty()) sb.append(" ").append(attrs.joinToString(","))
-
-            sb.append(" ($nx1,$ny1)-($nx2,$ny2)")
-            sb.append('\n')
+        val left = bounds.left.coerceIn(0, displayWidth)
+        val top = bounds.top.coerceIn(0, displayHeight)
+        val right = bounds.right.coerceIn(0, displayWidth)
+        val bottom = bounds.bottom.coerceIn(0, displayHeight)
+        if (right > left && bottom > top) {
+            out.add(
+                UiElement(
+                    type = node.className?.toString()?.substringAfterLast('.') ?: "View",
+                    text = node.text?.toString(),
+                    label = node.contentDescription?.toString()?.takeIf { it.isNotBlank() }
+                        ?: node.hintText?.toString(),
+                    id = node.viewIdResourceName?.substringAfterLast('/'),
+                    left = left, top = top, right = right, bottom = bottom,
+                    clickable = node.isClickable,
+                    longClickable = node.isLongClickable,
+                    scrollable = node.isScrollable,
+                    editable = node.isEditable,
+                    checkable = node.isCheckable,
+                    checked = node.isChecked,
+                    focused = node.isFocused,
+                    selected = node.isSelected,
+                    enabled = node.isEnabled,
+                )
+            )
         }
 
-        // Recurse children
-        for (i in 0 until childCount) {
+        for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            traverseNode(child, depth + 1, sb, displayWidth, displayHeight,
-                nodeCount, incCount)
+            collect(child, depth + 1, out, displayWidth, displayHeight)
             child.recycle()
         }
     }

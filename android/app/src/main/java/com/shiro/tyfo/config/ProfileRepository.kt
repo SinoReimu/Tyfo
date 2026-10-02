@@ -76,22 +76,29 @@ class ProfileRepository(private val config: ConfigRepository, context: Context) 
     }
 
     fun ensureMigrated() {
+        dropUnsupportedProfiles()
         if (config.activeProfileName.isEmpty()) {
             val name = generateProfileName(config.apiProvider, config.model)
             saveCurrentAsProfile(name)
         }
-        addDefaultProfiles()
     }
 
-    private fun addDefaultProfiles() {
-        if (getProfile("ollama") != null) return
-        saveProfile(ProviderProfile(
-            name = "ollama",
-            provider = ConfigRepository.PROVIDER_OLLAMA,
-            apiKey = "",
-            model = ConfigRepository.DEFAULT_OLLAMA_MODEL,
-            baseUrl = ConfigRepository.DEFAULT_OLLAMA_BASE_URL
-        ))
+    /**
+     * 以前其他协议的 profile（OpenAI 兼容 / Anthropic / Ollama / Kimi）现在用不了：指向方舟端点的改成方舟，
+     * 其余删掉；当前用的 profile 被删时清掉“当前 profile”，配置本身已由 ConfigRepository 迁到方舟。
+     */
+    private fun dropUnsupportedProfiles() {
+        val profiles = listProfiles()
+        val kept = profiles.mapNotNull { p ->
+            when {
+                p.provider in ConfigRepository.SUPPORTED_PROVIDERS -> p
+                "volces.com" in p.baseUrl -> p.copy(provider = ConfigRepository.PROVIDER_ARK)
+                else -> null
+            }
+        }
+        if (kept == profiles) return
+        persist(kept)
+        if (kept.none { it.name == config.activeProfileName }) config.activeProfileName = ""
     }
 
     private fun persist(profiles: List<ProviderProfile>) {

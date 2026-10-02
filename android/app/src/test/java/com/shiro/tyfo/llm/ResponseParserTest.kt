@@ -6,529 +6,311 @@ import org.junit.Assert.*
 import org.junit.Test
 
 /**
- * Tests for parsing LLM API responses.
- *
- * The ResponseParser (or equivalent logic) is expected to:
- * 1. Extract function_call from the output array
- * 2. Fall back to parsing JSON from text output
- * 3. Handle malformed/empty responses gracefully
+ * Tests for the lenient parsing of model output: tool-call arguments that aren't valid JSON,
+ * and tool calls written into the reply text instead of the tool-call channel.
  */
 class ResponseParserTest {
 
-    /**
-     * Helper: build a function_call response JSON string.
-     */
-    private fun buildFunctionCallResponse(
-        name: String = "phone_action",
-        arguments: String
-    ): String {
-        return JSONObject().apply {
-            put("id", "resp_test")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "function_call")
-                    put("name", name)
-                    put("arguments", arguments)
-                })
-            })
-        }.toString()
-    }
-
-    /**
-     * Helper: build a text message response.
-     */
-    private fun buildTextResponse(text: String): String {
-        return JSONObject().apply {
-            put("id", "resp_text")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "message")
-                    put("content", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("type", "output_text")
-                            put("text", text)
-                        })
-                    })
-                })
-            })
-        }.toString()
-    }
-
-    // --- function_call parsing tests ---
-
-    @Test
-    fun `parse function_call extracts arguments correctly`() {
-        val args = """{"thought":"I see the home screen","action_type":"tap","x":500,"y":300,"completed":false}"""
-        val response = buildFunctionCallResponse(arguments = args)
-        val json = JSONObject(response)
-        val output = json.getJSONArray("output")
-        val item = output.getJSONObject(0)
-
-        assertEquals("function_call", item.getString("type"))
-        assertEquals("phone_action", item.getString("name"))
-
-        val parsed = JSONObject(item.getString("arguments"))
-        assertEquals("tap", parsed.getString("action_type"))
-        assertEquals(500, parsed.getInt("x"))
-        assertEquals(300, parsed.getInt("y"))
-        assertEquals("I see the home screen", parsed.getString("thought"))
-        assertFalse(parsed.getBoolean("completed"))
-    }
-
-    @Test
-    fun `parse function_call with finish action`() {
-        val args = """{"thought":"Task completed successfully","action_type":"finish","completed":true}"""
-        val response = buildFunctionCallResponse(arguments = args)
-        val json = JSONObject(response)
-        val output = json.getJSONArray("output")
-        val item = output.getJSONObject(0)
-        val parsed = JSONObject(item.getString("arguments"))
-
-        assertEquals("finish", parsed.getString("action_type"))
-        assertTrue(parsed.getBoolean("completed"))
-    }
-
-    @Test
-    fun `parse function_call with all action types`() {
-        val actionTypes = listOf(
-            "tap", "long_press", "open_app", "swipe",
-            "key_event", "type_text", "wait", "finish", "fail"
+    private val tapSpec = ToolSpec(
+        "tap", "Tap a point.",
+        listOf(
+            ToolParam.Text("thought", "Reasoning.", default = ""),
+            ToolParam.Integer("x", "X.", min = 0, max = 1000),
+            ToolParam.Integer("y", "Y.", min = 0, max = 1000),
         )
-        for (actionType in actionTypes) {
-            val args = """{"thought":"test","action_type":"$actionType","completed":false}"""
-            val response = buildFunctionCallResponse(arguments = args)
-            val json = JSONObject(response)
-            val output = json.getJSONArray("output")
-            val item = output.getJSONObject(0)
-            val parsed = JSONObject(item.getString("arguments"))
-            assertEquals(actionType, parsed.getString("action_type"))
-        }
-    }
+    )
 
-    // --- Text fallback parsing tests ---
+    private val swipeSpec = ToolSpec(
+        "swipe", "Swipe.",
+        listOf(
+            ToolParam.Text("thought", "Reasoning.", default = ""),
+            ToolParam.Integer("start_x", "."), ToolParam.Integer("start_y", "."),
+            ToolParam.Integer("end_x", "."), ToolParam.Integer("end_y", "."),
+            ToolParam.Integer("duration_ms", ".", required = false),
+        )
+    )
+
+    private val typeSpec = ToolSpec(
+        "type_text", "Type.",
+        listOf(ToolParam.Text("thought", "Reasoning.", default = ""), ToolParam.Text("text", "Text."))
+    )
+
+    private val pointSpec = ToolSpec(
+        "tap", "Tap a point.",
+        listOf(ToolParam.Text("reason", "Why."), ToolParam.Point("point", "Where.", 1000, 1000))
+    )
+
+    private val finishSpec = ToolSpec(
+        "finish", "End.",
+        listOf(ToolParam.Text("answer", "Answer."), ToolParam.Bool("success", "Done?", default = true))
+    )
+
+    private fun args(call: ToolCall): JSONObject = JSONObject(call.arguments)
+
+    // --- parseArguments ---
 
     @Test
-    fun `parse text fallback extracts JSON from plain text`() {
-        val jsonStr = """{"thought":"fallback","action_type":"wait","completed":false}"""
-        val response = buildTextResponse(jsonStr)
-        val json = JSONObject(response)
-        val output = json.getJSONArray("output")
-        val message = output.getJSONObject(0)
-        val content = message.getJSONArray("content")
-        val text = content.getJSONObject(0).getString("text")
-
-        val parsed = JSONObject(text)
-        assertEquals("wait", parsed.getString("action_type"))
-    }
-
-    @Test
-    fun `parse text fallback extracts JSON from markdown code block`() {
-        val text = """Here is the action:
-```json
-{"thought":"found it","action_type":"tap","x":100,"y":200,"completed":false}
-```"""
-        // Extract JSON from code block
-        val jsonPattern = Regex("```(?:json)?\\s*\\n?(\\{.*?})\\s*\\n?```", RegexOption.DOT_MATCHES_ALL)
-        val match = jsonPattern.find(text)
-        assertNotNull("Should find JSON in code block", match)
-        val parsed = JSONObject(match!!.groupValues[1])
-        assertEquals("tap", parsed.getString("action_type"))
-        assertEquals(100, parsed.getInt("x"))
+    fun `parseArguments parses valid JSON`() {
+        val result = ResponseParser.parseArguments("""{"thought":"tap it","x":500,"y":300}""", tapSpec)
+        assertEquals(mapOf("thought" to "tap it", "x" to 500, "y" to 300), result)
     }
 
     @Test
-    fun `parse text fallback extracts JSON from mixed text`() {
-        val text = """I'll tap the settings icon. {"thought":"opening settings","action_type":"tap","x":500,"y":300,"completed":false}"""
-        // Extract first JSON object from text
-        val startIdx = text.indexOf('{')
-        assertTrue("Should find opening brace", startIdx >= 0)
-
-        // Simple bracket-matching extraction
-        var depth = 0
-        var endIdx = -1
-        for (i in startIdx until text.length) {
-            when (text[i]) {
-                '{' -> depth++
-                '}' -> {
-                    depth--
-                    if (depth == 0) {
-                        endIdx = i
-                        break
-                    }
-                }
-            }
-        }
-        assertTrue("Should find closing brace", endIdx > startIdx)
-
-        val jsonStr = text.substring(startIdx, endIdx + 1)
-        val parsed = JSONObject(jsonStr)
-        assertEquals("tap", parsed.getString("action_type"))
-    }
-
-    // --- Malformed JSON handling ---
-
-    @Test
-    fun `handle malformed JSON gracefully`() {
-        val malformedArgs = """{"thought":"broken","action_type":"tap","x":}"""
-        try {
-            JSONObject(malformedArgs)
-            fail("Should throw on malformed JSON")
-        } catch (e: org.json.JSONException) {
-            // Expected - malformed JSON should be caught
-            assertNotNull(e.message)
-        }
+    fun `parseArguments treats empty or blank arguments as no arguments`() {
+        assertEquals(emptyMap<String, Any?>(), ResponseParser.parseArguments("", tapSpec))
+        assertEquals(emptyMap<String, Any?>(), ResponseParser.parseArguments("   ", null))
     }
 
     @Test
-    fun `handle truncated JSON`() {
-        val truncated = """{"thought":"cut off","action_typ"""
-        try {
-            JSONObject(truncated)
-            fail("Should throw on truncated JSON")
-        } catch (e: org.json.JSONException) {
-            assertNotNull(e.message)
-        }
-    }
-
-    // --- Empty response handling ---
-
-    @Test
-    fun `handle empty output array`() {
-        val response = JSONObject().apply {
-            put("id", "resp_empty")
-            put("output", JSONArray())
-        }
-        val output = response.getJSONArray("output")
-        assertEquals(0, output.length())
+    fun `parseArguments closes JSON truncated before the final brace`() {
+        val result = ResponseParser.parseArguments("""{"thought":"open settings","x":12,"y":34""", tapSpec)
+        assertEquals(mapOf("thought" to "open settings", "x" to 12, "y" to 34), result)
     }
 
     @Test
-    fun `handle response with no output field`() {
-        val response = JSONObject().apply {
-            put("id", "resp_no_output")
-        }
-        assertFalse(response.has("output"))
+    fun `parseArguments keeps unicode and emoji values`() {
+        val result = ResponseParser.parseArguments("""{"thought":"输入中文","text":"你好世界 🌍"}""", typeSpec)
+        assertEquals("你好世界 🌍", result!!["text"])
+        assertEquals("输入中文", result["thought"])
     }
 
     @Test
-    fun `handle null arguments in function call`() {
-        val response = JSONObject().apply {
-            put("id", "resp_null")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "function_call")
-                    put("name", "phone_action")
-                    put("arguments", JSONObject.NULL)
-                })
-            })
-        }
-        val item = response.getJSONArray("output").getJSONObject(0)
-        assertTrue(item.isNull("arguments"))
-    }
-
-    // --- incomplete_details handling ---
-
-    @Test
-    fun `handle incomplete_details in response`() {
-        val response = JSONObject().apply {
-            put("id", "resp_incomplete")
-            put("status", "incomplete")
-            put("incomplete_details", JSONObject().apply {
-                put("reason", "max_output_tokens")
-            })
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "message")
-                    put("content", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("type", "output_text")
-                            put("text", """{"thought":"partial","action_type":"wait"}""")
-                        })
-                    })
-                })
-            })
-        }
-
-        assertEquals("incomplete", response.getString("status"))
-        assertTrue(response.has("incomplete_details"))
-        assertEquals("max_output_tokens",
-            response.getJSONObject("incomplete_details").getString("reason"))
-
-        // Should still be able to parse whatever output was provided
-        val output = response.getJSONArray("output")
-        assertTrue(output.length() > 0)
-    }
-
-    @Test
-    fun `handle multiple output items picks first function_call`() {
-        val response = JSONObject().apply {
-            put("id", "resp_multi")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "message")
-                    put("content", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("type", "output_text")
-                            put("text", "thinking...")
-                        })
-                    })
-                })
-                put(JSONObject().apply {
-                    put("type", "function_call")
-                    put("name", "phone_action")
-                    put("arguments", """{"thought":"act","action_type":"tap","x":1,"y":2,"completed":false}""")
-                })
-            })
-        }
-
-        val output = response.getJSONArray("output")
-        var functionCall: JSONObject? = null
-        for (i in 0 until output.length()) {
-            val item = output.getJSONObject(i)
-            if (item.getString("type") == "function_call") {
-                functionCall = item
-                break
-            }
-        }
-
-        assertNotNull("Should find function_call in output", functionCall)
-        assertEquals("phone_action", functionCall!!.getString("name"))
-    }
-
-    // ==========================================================================
-    // Tests that call the REAL ResponseParser methods
-    // ==========================================================================
-
-    // --- extractJsonFromText ---
-
-    @Test
-    fun `extractJsonFromText parses markdown fenced JSON`() {
-        val text = """Here is my action:
-```json
-{"thought":"opening settings","action_type":"tap","x":500,"y":300,"completed":false}
-```
-That should do it."""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull("Should extract JSON from markdown fence", result)
-        assertEquals("tap", result!!["action_type"])
-        assertEquals(500, result["x"])
-        assertEquals(300, result["y"])
-        assertEquals("opening settings", result["thought"])
-        assertEquals(false, result["completed"])
-    }
-
-    @Test
-    fun `extractJsonFromText parses plain JSON in text`() {
-        val text = """I will tap the button. {"thought":"tapping","action_type":"tap","x":100,"y":200,"completed":false} Done."""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull("Should extract JSON from plain text", result)
-        assertEquals("tap", result!!["action_type"])
-        assertEquals(100, result["x"])
-        assertEquals(200, result["y"])
-    }
-
-    @Test
-    fun `extractJsonFromText parses standalone JSON string`() {
-        val text = """{"thought":"done","action_type":"finish","completed":true}"""
-        val result = ResponseParser.extractJsonFromText(text)
+    fun `parseArguments salvages a string value with unescaped quotes up to the next key`() {
+        // Streaming sometimes turns \" into a bare quote, which makes the whole object unparseable
+        val raw = """{"thought":"用户说"好的"，点击确认","x":500,"y":880}"""
+        val result = ResponseParser.parseArguments(raw, tapSpec)
         assertNotNull(result)
-        assertEquals("finish", result!!["action_type"])
-        assertEquals(true, result["completed"])
-    }
-
-    // --- extractFieldsFromMalformedJson ---
-
-    @Test
-    fun `extractFieldsFromMalformedJson handles truncated JSON`() {
-        val truncated = """{"thought":"starting the app","action_type":"open_app","app_name":"Settings","completed":false"""
-        val result = ResponseParser.extractFieldsFromMalformedJson(truncated)
-        assertNotNull("Should extract fields from truncated JSON", result)
-        assertEquals("open_app", result!!["action_type"])
-        assertEquals("Settings", result["app_name"])
-        assertEquals(false, result["completed"])
+        assertEquals("用户说\"好的\"，点击确认", result!!["thought"])
+        assertEquals(500, result["x"])
+        assertEquals(880, result["y"])
     }
 
     @Test
-    fun `extractFieldsFromMalformedJson handles extra commas`() {
-        val malformed = """{"thought":"swiping up","action_type":"swipe",,"start_x":620,"start_y":700,,"end_x":620,"end_y":300,"duration_ms":800,"completed":false,}"""
-        val result = ResponseParser.extractFieldsFromMalformedJson(malformed)
-        assertNotNull("Should extract fields despite extra commas", result)
-        assertEquals("swipe", result!!["action_type"])
-        assertEquals("swiping up", result["thought"])
+    fun `a salvaged string stops at an undeclared key too`() {
+        // The unescaped quotes make the JSON invalid for both Android's and the JVM's org.json
+        val raw = """{"thought":"say "ok" then tap","note":"n","x":1,"y":3}"""
+        val result = ResponseParser.parseArguments(raw, tapSpec)!!
+        assertEquals("say \"ok\" then tap", result["thought"])
+        assertEquals(1, result["x"])
+        assertEquals(3, result["y"])
+    }
+
+    @Test
+    fun `parseArguments salvages the last string value before the closing brace`() {
+        val raw = """{"thought":"type it","text":"say "hi" now"}"""
+        val result = ResponseParser.parseArguments(raw, typeSpec)
+        assertEquals("say \"hi\" now", result!!["text"])
+        assertEquals("type it", result["thought"])
+    }
+
+    @Test
+    fun `parseArguments salvages the first number of a garbled integer`() {
+        // Seen from a real model: "x": 382 896. The broken thought keeps the object unparseable for
+        // every org.json flavor (the JVM test library would otherwise read 382 896 as a string).
+        val raw = """{"thought":"tap "OK"","x": 382 896, "y": 896}"""
+        val result = ResponseParser.parseArguments(raw, tapSpec)
+        assertEquals(382, result!!["x"])
+        assertEquals(896, result["y"])
+        assertEquals("tap \"OK\"", result["thought"])
+    }
+
+    @Test
+    fun `parseArguments salvages quoted and decimal integers`() {
+        val result = ResponseParser.parseArguments("""{"x":"500" "y":299.6}""", tapSpec)
+        assertEquals(500, result!!["x"])
+        assertEquals(299, result["y"])
+    }
+
+    @Test
+    fun `parseArguments salvages despite doubled commas`() {
+        val raw = """{"thought":"swiping up",,"start_x":620,"start_y":700,,"end_x":620,"end_y":300,"duration_ms":800,}"""
+        val result = ResponseParser.parseArguments(raw, swipeSpec)
+        assertEquals("swiping up", result!!["thought"])
         assertEquals(620, result["start_x"])
         assertEquals(700, result["start_y"])
         assertEquals(620, result["end_x"])
         assertEquals(300, result["end_y"])
         assertEquals(800, result["duration_ms"])
-        assertEquals(false, result["completed"])
     }
 
     @Test
-    fun `extractFieldsFromMalformedJson returns null for no action_type`() {
-        val noAction = """{"thought":"just thinking"}"""
-        val result = ResponseParser.extractFieldsFromMalformedJson(noAction)
-        assertNull("Should return null when action_type is absent", result)
-    }
-
-    // --- Unicode in action parameters ---
-
-    @Test
-    fun `extractJsonFromText handles unicode in parameters`() {
-        val text = """{"thought":"输入中文文本","action_type":"type_text","text":"你好世界","completed":false}"""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull("Should handle unicode text", result)
-        assertEquals("type_text", result!!["action_type"])
-        assertEquals("你好世界", result["text"])
-        assertEquals("输入中文文本", result["thought"])
+    fun `a point written with a space instead of a comma is salvaged`() {
+        // Doubao's GUI training writes points as "x y"; the broken reason keeps every org.json flavor from parsing it
+        val raw = """{"reason":"tap "OK"","point": [270 54]}"""
+        val result = ResponseParser.parseArguments(raw, pointSpec)!!
+        assertEquals(listOf(270.0, 54.0), result["point"])
+        assertEquals("tap \"OK\"", result["reason"])
     }
 
     @Test
-    fun `extractJsonFromText handles emoji in text field`() {
-        val text = """{"thought":"typing emoji","action_type":"type_text","text":"Hello 🌍🎉","completed":false}"""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull(result)
-        assertEquals("type_text", result!!["action_type"])
-        assertEquals("Hello 🌍🎉", result["text"])
-    }
-
-    // --- Empty / null fields ---
-
-    @Test
-    fun `extractJsonFromText handles empty string fields`() {
-        val text = """{"thought":"","action_type":"wait","completed":false}"""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull(result)
-        assertEquals("wait", result!!["action_type"])
-        assertEquals("", result["thought"])
+    fun `a point missing its closing bracket is salvaged`() {
+        val result = ResponseParser.parseArguments("""{"point": [117 265}""", pointSpec)!!
+        assertEquals(listOf(117.0, 265.0), result["point"])
     }
 
     @Test
-    fun `extractJsonFromText handles null fields`() {
-        val text = """{"thought":"testing null","action_type":"tap","x":100,"y":200,"app_name":null,"completed":false}"""
-        val result = ResponseParser.extractJsonFromText(text)
-        assertNotNull(result)
-        assertEquals("tap", result!!["action_type"])
-        assertNull("null JSON value should become null", result["app_name"])
+    fun `a point with a comma inside broken JSON is salvaged`() {
+        val result = ResponseParser.parseArguments("""{"reason":"a "b"","point":[208, 661.5]}""", pointSpec)!!
+        assertEquals(listOf(208.0, 661.5), result["point"])
     }
 
     @Test
-    fun `jsonObjectToMap converts null values`() {
+    fun `a point written as a point tag is kept for the registry to read`() {
+        // Missing closing brace: repaired, so the tag string comes through as the value
+        val result = ResponseParser.parseArguments("""{"point":"<point>208 661</point>"""", pointSpec)!!
+        assertEquals("<point>208 661</point>", result["point"])
+    }
+
+    @Test
+    fun `a boolean is salvaged from broken JSON`() {
+        val raw = """{"answer":"没订到 "Warroom"","success": false}"""
+        val result = ResponseParser.parseArguments(raw, finishSpec)!!
+        assertEquals(false, result["success"])
+        assertEquals("没订到 \"Warroom\"", result["answer"])
+    }
+
+    @Test
+    fun `parseArguments returns null when nothing can be salvaged`() {
+        assertNull(ResponseParser.parseArguments("""<tool>tap here</tool>""", tapSpec))
+    }
+
+    @Test
+    fun `parseArguments without a spec cannot salvage malformed JSON`() {
+        assertNull(ResponseParser.parseArguments("""{"x": 382, "y": 896 "oops"}""", null))
+    }
+
+    // --- toolCallsFromText ---
+
+    @Test
+    fun `toolCallsFromText reads name and arguments object`() {
+        val calls = ResponseParser.toolCallsFromText("""{"name":"tap","arguments":{"thought":"t","x":1,"y":2}}""")
+        assertEquals(1, calls.size)
+        assertEquals("tap", calls[0].name)
+        val a = args(calls[0])
+        assertEquals(1, a.getInt("x"))
+        assertEquals(2, a.getInt("y"))
+        assertEquals("t", a.getString("thought"))
+    }
+
+    @Test
+    fun `toolCallsFromText keeps arguments given as a JSON string`() {
+        val calls = ResponseParser.toolCallsFromText("""{"name":"open_app","arguments":"{\"app_name\":\"微信\"}"}""")
+        assertEquals("open_app", calls.single().name)
+        assertEquals("""{"app_name":"微信"}""", calls.single().arguments)
+    }
+
+    @Test
+    fun `toolCallsFromText accepts parameters and input as the arguments key`() {
+        val viaParameters = ResponseParser.toolCallsFromText("""{"name":"press_key","parameters":{"key":"back"}}""")
+        assertEquals("back", args(viaParameters.single()).getString("key"))
+        val viaInput = ResponseParser.toolCallsFromText("""{"name":"press_key","input":{"key":"enter"}}""")
+        assertEquals("enter", args(viaInput.single()).getString("key"))
+    }
+
+    @Test
+    fun `toolCallsFromText without arguments gives an empty object`() {
+        val call = ResponseParser.toolCallsFromText("""{"name":"wait"}""").single()
+        assertEquals("wait", call.name)
+        assertEquals(0, args(call).length())
+    }
+
+    @Test
+    fun `toolCallsFromText maps the legacy single-tool format`() {
+        val call = ResponseParser.toolCallsFromText(
+            """{"thought":"opening settings","action_type":"tap","x":500,"y":300}"""
+        ).single()
+        assertEquals("tap", call.name)
+        val a = args(call)
+        assertFalse("action_type must not leak into the arguments", a.has("action_type"))
+        assertEquals(500, a.getInt("x"))
+        assertEquals(300, a.getInt("y"))
+        assertEquals("opening settings", a.getString("thought"))
+    }
+
+    @Test
+    fun `toolCallsFromText maps an action key`() {
+        val call = ResponseParser.toolCallsFromText("""{"action":" wait ","seconds":3}""").single()
+        assertEquals("wait", call.name)
+        assertFalse(args(call).has("action"))
+        assertEquals(3, args(call).getInt("seconds"))
+    }
+
+    @Test
+    fun `toolCallsFromText finds a call inside a markdown fence`() {
+        val text = """Here is my action:
+```json
+{"name":"tap","arguments":{"x":500,"y":300}}
+```
+That should do it."""
+        val call = ResponseParser.toolCallsFromText(text).single()
+        assertEquals("tap", call.name)
+        assertEquals(300, args(call).getInt("y"))
+    }
+
+    @Test
+    fun `toolCallsFromText finds a call inside tool_call tags`() {
+        val text = """<tool_call>{"name":"finish","arguments":{"answer":"北京 25°C"}}</tool_call>"""
+        val call = ResponseParser.toolCallsFromText(text).single()
+        assertEquals("finish", call.name)
+        assertEquals("北京 25°C", args(call).getString("answer"))
+    }
+
+    @Test
+    fun `toolCallsFromText ignores braces and quotes inside string values`() {
+        val text = """I'll type it. {"name":"type_text","arguments":{"text":"a } b { \"c\""}} done."""
+        val call = ResponseParser.toolCallsFromText(text).single()
+        assertEquals("a } b { \"c\"", args(call).getString("text"))
+    }
+
+    @Test
+    fun `toolCallsFromText returns every call when the text has several`() {
+        val text = """{"name":"note","arguments":{"key":"price","value":"5999"}}
+{"name":"tap","arguments":{"x":1,"y":2}}"""
+        val calls = ResponseParser.toolCallsFromText(text)
+        assertEquals(listOf("note", "tap"), calls.map { it.name })
+        assertNotEquals("each call gets its own id", calls[0].id, calls[1].id)
+    }
+
+    @Test
+    fun `toolCallsFromText skips objects that aren't calls`() {
+        val text = """{"foo":1} and then {"name":"wait","arguments":{}}"""
+        assertEquals(listOf("wait"), ResponseParser.toolCallsFromText(text).map { it.name })
+    }
+
+    @Test
+    fun `toolCallsFromText returns nothing for plain prose or broken JSON`() {
+        assertTrue(ResponseParser.toolCallsFromText("I think the task is done.").isEmpty())
+        assertTrue(ResponseParser.toolCallsFromText("""{"name":"tap","arguments":{"x":1""").isEmpty())
+        assertTrue(ResponseParser.toolCallsFromText("").isEmpty())
+    }
+
+    @Test
+    fun `toolCallsFromText finds a call after a stray brace in the prose`() {
+        val calls = ResponseParser.toolCallsFromText("""use {braces like this. {"name":"tap","arguments":{"x":1,"y":2}}""")
+        assertEquals(listOf("tap"), calls.map { it.name })
+    }
+
+    // --- helpers ---
+
+    @Test
+    fun `newCallId is unique and prefixed`() {
+        val ids = (1..50).map { ResponseParser.newCallId() }.toSet()
+        assertEquals(50, ids.size)
+        assertTrue(ids.all { it.startsWith("call_") })
+    }
+
+    @Test
+    fun `jsonObjectToMap converts nulls, nested objects and arrays`() {
         val json = JSONObject()
-        json.put("key1", "value1")
-        json.put("key2", JSONObject.NULL)
+            .put("a", "v")
+            .put("n", JSONObject.NULL)
+            .put("o", JSONObject().put("k", 1))
+            .put("l", JSONArray().put(1).put(JSONObject.NULL).put(JSONArray().put("x")))
         val map = ResponseParser.jsonObjectToMap(json)
-        assertEquals("value1", map["key1"])
-        assertNull(map["key2"])
-    }
-
-    // --- parse() with OpenAI tool_calls format ---
-
-    @Test
-    fun `parse handles OpenAI chat completions tool_calls format`() {
-        val response = JSONObject().apply {
-            put("id", "chatcmpl-test123")
-            put("choices", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("index", 0)
-                    put("message", JSONObject().apply {
-                        put("role", "assistant")
-                        put("tool_calls", JSONArray().apply {
-                            put(JSONObject().apply {
-                                put("id", "call_abc123")
-                                put("type", "function")
-                                put("function", JSONObject().apply {
-                                    put("name", "phone_action")
-                                    put("arguments", """{"thought":"I see the home screen","action_type":"tap","x":540,"y":960,"completed":false}""")
-                                })
-                            })
-                        })
-                    })
-                    put("finish_reason", "tool_calls")
-                })
-            })
-        }
-
-        val result = ResponseParser.parse(response)
-        assertNotNull("Should parse OpenAI tool_calls format", result)
-        assertEquals("tap", result!!["action_type"])
-        assertEquals(540, result["x"])
-        assertEquals(960, result["y"])
-        assertEquals(false, result["completed"])
-        assertEquals("I see the home screen", result["thought"])
-    }
-
-    // --- parse() with text-only response (no tool calls) ---
-
-    @Test
-    fun `parse handles text-only response via chat completions`() {
-        val response = JSONObject().apply {
-            put("id", "chatcmpl-text")
-            put("choices", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("index", 0)
-                    put("message", JSONObject().apply {
-                        put("role", "assistant")
-                        put("content", """{"thought":"no tool call","action_type":"wait","completed":false}""")
-                    })
-                    put("finish_reason", "stop")
-                })
-            })
-        }
-
-        val result = ResponseParser.parse(response)
-        assertNotNull("Should fall back to parsing JSON from content", result)
-        assertEquals("wait", result!!["action_type"])
-        assertEquals(false, result["completed"])
-    }
-
-    @Test
-    fun `parse handles Responses API text-only message`() {
-        val response = JSONObject().apply {
-            put("id", "resp_text_only")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "message")
-                    put("content", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("type", "output_text")
-                            put("text", """{"thought":"waiting","action_type":"wait","completed":false}""")
-                        })
-                    })
-                })
-            })
-        }
-
-        val result = ResponseParser.parse(response)
-        assertNotNull("Should extract JSON from text message in Responses API", result)
-        assertEquals("wait", result!!["action_type"])
-    }
-
-    @Test
-    fun `parse returns null for empty response`() {
-        val response = JSONObject().apply {
-            put("id", "resp_empty")
-        }
-        val result = ResponseParser.parse(response)
-        assertNull("Should return null for response with no output or choices", result)
-    }
-
-    @Test
-    fun `parse handles Responses API function_call`() {
-        val response = JSONObject().apply {
-            put("id", "resp_fc")
-            put("output", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("type", "function_call")
-                    put("name", "phone_action")
-                    put("arguments", """{"thought":"opening app","action_type":"open_app","app_name":"Chrome","completed":false}""")
-                })
-            })
-        }
-
-        val result = ResponseParser.parse(response)
-        assertNotNull(result)
-        assertEquals("open_app", result!!["action_type"])
-        assertEquals("Chrome", result["app_name"])
-        assertEquals(false, result["completed"])
+        assertEquals("v", map["a"])
+        assertTrue(map.containsKey("n"))
+        assertNull(map["n"])
+        assertEquals(mapOf("k" to 1), map["o"])
+        assertEquals(listOf(1, null, listOf("x")), map["l"])
     }
 }

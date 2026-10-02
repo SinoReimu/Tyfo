@@ -3,224 +3,148 @@ package com.shiro.tyfo.llm
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 /**
- * Parses the LLM API JSON response.
- * Extracts function_call arguments or falls back to JSON extraction from text.
+ * 模型输出的容错解析：工具参数不是合法 JSON 时尽量救回来，模型没走工具调用、把调用写成正文时也尽量认出来。
  */
 object ResponseParser {
 
     private const val TAG = "ResponseParser"
 
+    fun newCallId(): String = "call_" + UUID.randomUUID().toString().replace("-", "").take(16)
+
     /**
-     * Parse the response JSON and extract the action parameters map.
-     *
-     * Checks (in order):
-     * 1. output[] items with type=function_call → parse arguments
-     * 2. output[] items with type=message → extract JSON from text
-     * 3. choices[] (chat/completions fallback) → tool_calls or content
-     *
-     * @return Map of action parameters, or null if unparseable
+     * 解析一次工具调用的参数。依次尝试：直接解析、补上被截断的 `}`、按 [spec] 声明的参数逐个用正则抠
+     * （流式传输偶尔把字符串里的转义引号弄坏，或者模型写出 `"x": 382 896` 这样的值）。全都失败返回 null。
      */
-    fun parse(responseJson: JSONObject): Map<String, Any?>? {
-        // Check output array (Responses API format)
-        val output = responseJson.optJSONArray("output")
-        if (output != null) {
-            for (i in 0 until output.length()) {
-                val item = output.getJSONObject(i)
-                val type = item.optString("type", "")
+    fun parseArguments(raw: String, spec: ToolSpec?): Map<String, Any?>? {
+        val text = raw.trim()
+        if (text.isEmpty()) return emptyMap()
+        parseObject(text)?.let { return it }
+        if (!text.endsWith("}")) parseObject("$text}")?.let { return it }
+        val salvaged = spec?.let { salvage(text, it) }
+        if (salvaged != null) Log.w(TAG, "Salvaged ${salvaged.keys} from malformed arguments: ${text.take(200)}")
+        return salvaged
+    }
 
-                // function_call type
-                if (type == "function_call") {
-                    val argsStr = item.optString("arguments", "{}")
-                    return try {
-                        jsonObjectToMap(JSONObject(argsStr))
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to parse function_call arguments: $argsStr", e)
-                        null
-                    }
-                }
+    /**
+     * 模型没调用工具、而是把调用写在正文里时，从文字里找出调用。认这几种写法：
+     * `{"name": "tap", "arguments": {...}}`（也认 parameters / input）、
+     * 旧的单工具格式 `{"action_type": "tap", "x": 1, ...}`、`{"action": "tap", ...}`，
+     * 可以裹在 ``` 代码块或 `<tool_call>` 标签里。
+     */
+    fun toolCallsFromText(text: String): List<ToolCall> =
+        jsonObjectsIn(text).mapNotNull { obj -> toolCallFrom(jsonObjectToMap(obj)) }
 
-                // message type → look for text content
-                if (type == "message") {
-                    val content = item.optJSONArray("content")
-                    if (content != null) {
-                        for (j in 0 until content.length()) {
-                            val contentItem = content.getJSONObject(j)
-                            val contentType = contentItem.optString("type", "")
-                            if (contentType == "output_text" || contentType == "text") {
-                                val text = contentItem.optString("text", "")
-                                if (text.isNotEmpty()) {
-                                    Log.w(TAG, "No tool_call, extracting JSON from text")
-                                    return extractJsonFromText(text)
-                                }
-                            }
-                        }
-                    }
-                }
+    private fun toolCallFrom(map: Map<String, Any?>): ToolCall? {
+        val name = map["name"] as? String
+        if (!name.isNullOrBlank()) {
+            val args = map["arguments"] ?: map["parameters"] ?: map["input"] ?: emptyMap<String, Any?>()
+            val json = when (args) {
+                is String -> args
+                is Map<*, *> -> JSONObject(args).toString()
+                else -> "{}"
+            }
+            return ToolCall(newCallId(), name.trim(), json)
+        }
+        for (key in listOf("action_type", "action")) {
+            val legacy = map[key] as? String
+            if (!legacy.isNullOrBlank()) {
+                return ToolCall(newCallId(), legacy.trim(), JSONObject(map - key).toString())
             }
         }
-
-        // Fallback: chat/completions style
-        val choices = responseJson.optJSONArray("choices")
-        if (choices != null && choices.length() > 0) {
-            val choice = choices.getJSONObject(0)
-            val message = choice.optJSONObject("message") ?: return null
-
-            // Check tool_calls
-            val toolCalls = message.optJSONArray("tool_calls")
-            if (toolCalls != null && toolCalls.length() > 0) {
-                val function = toolCalls.getJSONObject(0).optJSONObject("function")
-                if (function != null) {
-                    val argsStr = function.optString("arguments", "{}")
-                    return try {
-                        jsonObjectToMap(JSONObject(argsStr))
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to parse tool_calls arguments", e)
-                        null
-                    }
-                }
-            }
-
-            // Check content
-            val content = message.optString("content", "")
-            if (content.isNotEmpty()) {
-                return extractJsonFromText(content)
-            }
-        }
-
-        // Check for incomplete response
-        val incomplete = responseJson.optJSONObject("incomplete_details")
-        if (incomplete != null) {
-            Log.w(TAG, "Incomplete response: $incomplete")
-        }
-
         return null
     }
 
     /**
-     * Extract a JSON object from text that may contain markdown fences or other wrapping.
+     * 文字里所有能解析的 JSON 对象（括号配对时跳过字符串里的内容）。从某个 `{` 开始配不上对、
+     * 或配上了却不是合法 JSON（比如正文里随手写的花括号），就从下一个 `{` 重新找。
      */
-    fun extractJsonFromText(text: String): Map<String, Any?>? {
-        // Try direct parse first
-        try {
-            return jsonObjectToMap(JSONObject(text))
-        } catch (_: Exception) {}
-
-        // Try to find JSON in markdown code blocks (escape } for Android ICU regex)
-        try {
-            val codeBlockPattern = Regex("```(?:json)?\\s*\\n?(\\{.*?\\})\\s*\\n?```", RegexOption.DOT_MATCHES_ALL)
-            val codeBlockMatch = codeBlockPattern.find(text)
-            if (codeBlockMatch != null) {
-                try {
-                    return jsonObjectToMap(JSONObject(codeBlockMatch.groupValues[1]))
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-
-        // Try to find any JSON object in the text
-        try {
-            val jsonPattern = Regex("\\{[^{}]*(?:\\{[^{}]*\\}[^{}]*)*\\}", RegexOption.DOT_MATCHES_ALL)
-            val jsonMatch = jsonPattern.find(text)
-            if (jsonMatch != null) {
-                try {
-                    return jsonObjectToMap(JSONObject(jsonMatch.value))
-                } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-
-        // Last resort: regex-based field extraction for malformed JSON
-        // (e.g. unescaped quotes inside string values from some models)
-        val fields = extractFieldsFromMalformedJson(text)
-        if (fields != null) return fields
-
-        Log.w(TAG, "Could not extract JSON from text: ${text.take(200)}")
-        return null
+    private fun jsonObjectsIn(text: String): List<JSONObject> {
+        val found = mutableListOf<JSONObject>()
+        var from = 0
+        while (true) {
+            val start = text.indexOf('{', from)
+            if (start < 0) break
+            val end = matchingBrace(text, start)
+            val obj = if (end < 0) null else runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull()
+            if (obj != null) found.add(obj)
+            from = if (obj != null) end + 1 else start + 1
+        }
+        return found
     }
 
-    /**
-     * Extract action fields from malformed JSON using regex.
-     * Handles cases where SSE streaming corrupts escaped quotes in string values,
-     * making the JSON unparseable but individual fields still extractable.
-     */
-    fun extractFieldsFromMalformedJson(text: String): Map<String, Any?>? {
+    /** 和 [start] 处的 `{` 配对的 `}` 的位置，配不上返回 -1。 */
+    private fun matchingBrace(text: String, start: Int): Int {
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (i in start until text.length) {
+            val c = text[i]
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                continue
+            }
+            when (c) {
+                '"' -> inString = true
+                '{' -> depth++
+                '}' -> if (--depth == 0) return i
+            }
+        }
+        return -1
+    }
+
+    private fun parseObject(text: String): Map<String, Any?>? =
+        runCatching { jsonObjectToMap(JSONObject(text)) }.getOrNull()
+
+    /** 按声明的参数逐个抠值。字符串值抠到下一个 `,"键":` 为止，这样值里混了没转义的引号也能拿到。 */
+    private fun salvage(text: String, spec: ToolSpec): Map<String, Any?>? {
         val map = mutableMapOf<String, Any?>()
-
-        // Extract action_type (simple string, no embedded quotes)
-        Regex("\"action_type\"\\s*:\\s*\"([^\"]+)\"").find(text)?.let {
-            map["action_type"] = it.groupValues[1]
-        }
-
-        // Extract numeric fields
-        Regex("\"x\"\\s*:\\s*(\\d+)").find(text)?.let {
-            map["x"] = it.groupValues[1].toIntOrNull() ?: return@let
-        }
-        Regex("\"y\"\\s*:\\s*(\\d+)").find(text)?.let {
-            map["y"] = it.groupValues[1].toIntOrNull() ?: return@let
-        }
-        for (field in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
-            Regex("\"$field\"\\s*:\\s*(\\d+)").find(text)?.let {
-                map[field] = it.groupValues[1].toIntOrNull() ?: return@let
+        for (param in spec.params) {
+            val key = Regex.escape(param.name)
+            when (param) {
+                is ToolParam.Integer -> Regex("\"$key\"\\s*:\\s*\"?(-?\\d+(?:\\.\\d+)?)")
+                    .find(text)?.let { map[param.name] = it.groupValues[1].toDouble().toInt() }
+                is ToolParam.Text -> {
+                    val value = Regex(
+                        "\"$key\"\\s*:\\s*\"(.*?)\"\\s*(?=,\\s*\"\\w+\"\\s*:|\\}\\s*$)",
+                        RegexOption.DOT_MATCHES_ALL
+                    ).find(text)?.groupValues?.get(1)
+                        ?: Regex("\"$key\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(text)?.groupValues?.get(1)
+                    if (value != null) map[param.name] = unescape(value)
+                }
+                is ToolParam.Bool -> Regex("\"$key\"\\s*:\\s*\"?(true|false)")
+                    .find(text)?.let { map[param.name] = it.groupValues[1] == "true" }
+                // 点：键后面的头两个数，括号、引号、逗号写没写对都不管（豆包常写成 [270 54]，偶尔漏掉 ]）
+                is ToolParam.Point -> Regex("\"$key\"\\s*:\\s*[\\[\"(]?\\s*(?:<point>)?\\s*(-?\\d+(?:\\.\\d+)?)\\s*[, ]\\s*(-?\\d+(?:\\.\\d+)?)")
+                    .find(text)?.let { map[param.name] = listOf(it.groupValues[1].toDouble(), it.groupValues[2].toDouble()) }
             }
         }
-        // Extract completed (boolean)
-        Regex("\"completed\"\\s*:\\s*(true|false)").find(text)?.let {
-            map["completed"] = it.groupValues[1].toBoolean()
-        }
-
-        // Extract simple string fields (no embedded quotes expected)
-        for (field in listOf("app_name", "key", "text", "reason", "question", "note", "memory_key", "memory_value", "memory_category")) {
-            Regex("\"$field\"\\s*:\\s*\"([^\"]+)\"").find(text)?.let {
-                map[field] = it.groupValues[1]
-            }
-        }
-
-        // Extract thought: grab everything between "thought":"..." up to the next known field
-        Regex("\"thought\"\\s*:\\s*\"(.*?)\"\\s*,\\s*\"(?:action_type|completed|x|y|start_x|start_y|end_x|end_y|duration_ms|app_name|key|text|reason|question)\"",
-            RegexOption.DOT_MATCHES_ALL).find(text)?.let {
-            map["thought"] = it.groupValues[1]
-        }
-
-        if (map.containsKey("action_type")) {
-            Log.d(TAG, "Extracted fields from malformed JSON: ${map.keys}")
-            return map
-        }
-
-        return null
+        return map.ifEmpty { null }
     }
 
-    /**
-     * Convert a JSONObject to a Map<String, Any?>.
-     */
+    private fun unescape(s: String): String =
+        s.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
+
     fun jsonObjectToMap(json: JSONObject): Map<String, Any?> {
         val map = mutableMapOf<String, Any?>()
         val keys = json.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            val value = json.get(key)
-            map[key] = when (value) {
-                JSONObject.NULL -> null
-                is JSONObject -> jsonObjectToMap(value)
-                is JSONArray -> jsonArrayToList(value)
-                else -> value
-            }
+            map[key] = fromJson(json.get(key))
         }
         return map
     }
 
-    private fun jsonArrayToList(array: JSONArray): List<Any?> {
-        val list = mutableListOf<Any?>()
-        for (i in 0 until array.length()) {
-            val value = array.get(i)
-            list.add(
-                when (value) {
-                    JSONObject.NULL -> null
-                    is JSONObject -> jsonObjectToMap(value)
-                    is JSONArray -> jsonArrayToList(value)
-                    else -> value
-                }
-            )
-        }
-        return list
+    private fun fromJson(value: Any?): Any? = when (value) {
+        JSONObject.NULL -> null
+        is JSONObject -> jsonObjectToMap(value)
+        is JSONArray -> (0 until value.length()).map { fromJson(value.get(it)) }
+        else -> value
     }
 }

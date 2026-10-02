@@ -15,14 +15,6 @@
                 android:title="@string/profile_dialog_title"
                 android:summary="@string/pref_profile_summary_none" />
 
-            <ListPreference
-                android:key="api_provider"
-                android:title="@string/pref_provider_title"
-                android:summary="%s"
-                android:entries="@array/api_providers"
-                android:entryValues="@array/api_provider_values"
-                android:defaultValue="openai" />
-
             <EditTextPreference
                 android:key="api_key"
                 android:title="@string/pref_api_key_title"
@@ -35,14 +27,14 @@
                 android:title="@string/pref_model_title"
                 android:summary="@string/pref_not_set"
                 android:inputType="text"
-                android:defaultValue="gpt-5.5" />
+                android:defaultValue="ark-code-latest" />
 
             <EditTextPreference
                 android:key="base_url"
                 android:title="@string/pref_base_url_title"
                 android:summary="@string/pref_not_set"
                 android:inputType="textUri"
-                android:defaultValue="https://api.openai.com/v1" />
+                android:defaultValue="https://ark.cn-beijing.volces.com/api/plan/v3" />
 
         </PreferenceScreen>
 

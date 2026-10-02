@@ -22,18 +22,6 @@
     <string name="handoff_return_now">Return now</string>
     <string name="handoff_cancel_return">Cancel return</string>
     <string name="toast_microphone_permission_required">Microphone permission is required</string>
-    <string-array name="api_providers">
-        <item>OpenAI Compatible</item>
-        <item>Anthropic</item>
-        <item>Ollama (Local)</item>
-        <item>Kimi</item>
-    </string-array>
-    <string-array name="api_provider_values">
-        <item>openai</item>
-        <item>anthropic</item>
-        <item>ollama</item>
-        <item>kimi</item>
-    </string-array>
 
     <!-- Control panel -->
     <string name="btn_memory_label">Mem</string>
@@ -62,7 +50,6 @@
     <string name="pref_app_blacklist">App Blacklist</string>
     <string name="pref_app_blacklist_summary">Select apps the AI cannot access</string>
     <string name="pref_app_blacklist_none">No apps blacklisted</string>
-    <string name="pref_provider_title">Provider</string>
     <string name="pref_api_key_title">API Key</string>
     <string name="pref_masked_summary">Tap to edit</string>
     <string name="pref_not_set">Not set</string>

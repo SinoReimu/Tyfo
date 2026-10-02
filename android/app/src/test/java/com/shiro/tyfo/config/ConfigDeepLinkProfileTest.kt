@@ -8,7 +8,7 @@ class ConfigDeepLinkProfileTest {
     @Test
     fun `parse extracts profile name`() {
         val params = mapOf(
-            "provider" to "anthropic",
+            "provider" to "ark",
             "api_key" to "sk-test",
             "model" to "claude-sonnet-4-7-20250415",
             "base_url" to "https://api.anthropic.com",
@@ -21,7 +21,7 @@ class ConfigDeepLinkProfileTest {
     @Test
     fun `parse returns null profile when absent`() {
         val params = mapOf(
-            "provider" to "openai",
+            "provider" to "ark",
             "api_key" to "sk-test",
             "model" to "gpt-5.5",
             "base_url" to "https://api.openai.com/v1"
@@ -33,7 +33,7 @@ class ConfigDeepLinkProfileTest {
     @Test
     fun `parse returns null profile when empty`() {
         val params = mapOf(
-            "provider" to "openai",
+            "provider" to "ark",
             "api_key" to "sk-test",
             "profile" to ""
         )

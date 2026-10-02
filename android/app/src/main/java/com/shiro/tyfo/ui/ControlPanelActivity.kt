@@ -165,9 +165,8 @@ class ControlPanelActivity : AppCompatActivity() {
                 val cfg = com.shiro.tyfo.config.ConfigRepository(context)
                 val key = intent.getStringExtra("set_key") ?: cfg.apiKey
                 val url = intent.getStringExtra("set_url") ?: cfg.baseUrl
-                val provider = intent.getStringExtra("set_provider") ?: cfg.apiProvider
-                cfg.applyProfile(provider, key, setModel, url, "$provider/$setModel")
-                Log.i(TAG, "set_config: provider=$provider model=$setModel url=$url key=${key.take(10)}…")
+                cfg.applyProfile(cfg.apiProvider, key, setModel, url, "${cfg.apiProvider}/$setModel")
+                Log.i(TAG, "set_config: model=$setModel url=$url key=${key.take(10)}…")
                 return
             }
             // Run VD POC test

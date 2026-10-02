@@ -152,6 +152,7 @@ class InputInjector(
             "back" to KeyEvent.KEYCODE_BACK,
             "home" to KeyEvent.KEYCODE_HOME,
             "enter" to KeyEvent.KEYCODE_ENTER,
+            "delete" to KeyEvent.KEYCODE_DEL,
             "recent" to KeyEvent.KEYCODE_APP_SWITCH
         )
     }
@@ -331,7 +332,7 @@ class InputInjector(
     }
 
     /**
-     * Send a key event by name (back, home, enter, recent).
+     * Send a key event by name (back, home, enter, delete, recent).
      */
     fun keyEvent(keyName: String): Boolean {
         val keyCode = KEY_MAP[keyName.lowercase()] ?: return false

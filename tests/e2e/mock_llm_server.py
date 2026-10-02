@@ -125,11 +125,20 @@ class MockLLMHandler(BaseHTTPRequestHandler):
         self._stream_tool_call(tool_call)
 
     def _stream_tool_call(self, tool_call: dict):
-        """Stream a tool_call response as SSE matching OpenAI format."""
-        arguments = json.dumps(tool_call, ensure_ascii=False)
+        """Stream one tool call as SSE matching OpenAI format.
+
+        Cases describe calls as {"action_type": "tap", "x": ...}. The app declares one tool per
+        action, so action_type becomes the tool name and the rest its arguments.
+        """
+        args = dict(tool_call)
+        name = args.pop("action_type", "wait")
+        if name == "finish" and "answer" not in args:
+            args["answer"] = args.pop("summary", args.get("thought", ""))
+        arguments = json.dumps(args, ensure_ascii=False)
+        call_id = f"call_mock_{len(self.server.request_log)}"
 
         chunks = [
-            {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_mock", "type": "function", "function": {"name": "phone_action", "arguments": ""}}]}, "finish_reason": None}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": call_id, "type": "function", "function": {"name": name, "arguments": ""}}]}, "finish_reason": None}]},
             {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": arguments}}]}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         ]

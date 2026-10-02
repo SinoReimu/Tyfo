@@ -2,13 +2,17 @@ package com.shiro.tyfo.engine
 
 import com.shiro.tyfo.action.ActionExecutor
 import com.shiro.tyfo.capture.ScreenCapture
-import com.shiro.tyfo.fixtures.FakeLlmClient
+import com.shiro.tyfo.fixtures.FakeModelClient
 import com.shiro.tyfo.fixtures.buildAskUserResponse
 import com.shiro.tyfo.fixtures.buildFailResponse
 import com.shiro.tyfo.fixtures.buildFinishResponse
 import com.shiro.tyfo.fixtures.buildTapResponse
-import com.shiro.tyfo.llm.LLMClientInterface
-import com.shiro.tyfo.llm.LLMException
+import com.shiro.tyfo.llm.ModelClient
+import com.shiro.tyfo.llm.ModelException
+import com.shiro.tyfo.llm.ReplyListener
+import com.shiro.tyfo.llm.LlmMessage
+import com.shiro.tyfo.llm.LlmReply
+import com.shiro.tyfo.llm.ToolSpec
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -25,16 +29,16 @@ import org.junit.Test
  */
 class AgentStateMachineTest {
 
-    private lateinit var fakeLlm: FakeLlmClient
+    private lateinit var fakeLlm: FakeModelClient
     private lateinit var actionExecutor: ActionExecutor
 
     @Before
     fun setUp() {
         mockkObject(ScreenCapture)
         every { ScreenCapture.captureBase64() } returns FAKE_SCREENSHOT
-        every { ScreenCapture.captureBase64(any(), any()) } returns FAKE_SCREENSHOT
+        every { ScreenCapture.captureBase64(any(), any(), any(), any()) } returns FAKE_SCREENSHOT
 
-        fakeLlm = FakeLlmClient()
+        fakeLlm = FakeModelClient()
         actionExecutor = mockk<ActionExecutor>(relaxed = true)
         coEvery { actionExecutor.execute(any(), any()) } returns StepResult(
             step = 1, actionType = "tap", thought = "tap", success = true,
@@ -80,9 +84,10 @@ class AgentStateMachineTest {
         // Use a suspending fake that blocks the second LLM call until we release it,
         // giving us a reliable window to call pause() while the engine is Running.
         val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val gatedLlm = object : LLMClientInterface {
+        val gatedLlm = object : ModelClient {
+            override val profile = FakeModelClient.TEST_PROFILE
             private var callCount = 0
-            override suspend fun chatWithTools(messages: List<Map<String, Any>>): Map<String, Any?> {
+            override suspend fun chat(messages: List<LlmMessage>, tools: List<ToolSpec>, listener: ReplyListener?): LlmReply {
                 callCount++
                 if (callCount == 1) return buildTapResponse(100, 200)
                 gate.await()
@@ -138,15 +143,16 @@ class AgentStateMachineTest {
 
     @Test
     fun `LLM exception transitions to Error state`() = runTest {
-        val errorLlm = object : LLMClientInterface {
-            override suspend fun chatWithTools(messages: List<Map<String, Any>>): Map<String, Any?> {
-                throw LLMException("API rate limit exceeded")
+        val errorLlm = object : ModelClient {
+            override val profile = FakeModelClient.TEST_PROFILE
+            override suspend fun chat(messages: List<LlmMessage>, tools: List<ToolSpec>, listener: ReplyListener?): LlmReply {
+                throw ModelException("API rate limit exceeded")
             }
             override fun shutdown() {}
         }
 
         val engine = AgentEngine(
-            llmClient = errorLlm,
+            model = errorLlm,
             actionExecutor = actionExecutor,
             maxSteps = 10
         )
@@ -223,7 +229,7 @@ class AgentStateMachineTest {
 
     private fun createEngine(maxSteps: Int = 100): AgentEngine {
         return AgentEngine(
-            llmClient = fakeLlm,
+            model = fakeLlm,
             actionExecutor = actionExecutor,
             maxSteps = maxSteps
         )

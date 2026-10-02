@@ -45,7 +45,7 @@ class ProviderProfileTest {
         val json = org.json.JSONObject().apply { put("name", "minimal") }
         val profile = ProviderProfile.fromJson(json)
         assertEquals("minimal", profile.name)
-        assertEquals(ConfigRepository.PROVIDER_OPENAI, profile.provider)
+        assertEquals(ConfigRepository.PROVIDER_ARK, profile.provider)
         assertEquals("", profile.apiKey)
         assertEquals(ConfigRepository.DEFAULT_MODEL, profile.model)
         assertEquals(ConfigRepository.DEFAULT_BASE_URL, profile.baseUrl)

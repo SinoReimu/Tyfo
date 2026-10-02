@@ -7,10 +7,10 @@ import org.junit.Test
 class ConfigDeepLinkTest {
 
     @Test
-    fun `valid OpenAI config imports all fields`() {
+    fun `valid Ark config imports all fields`() {
         val result = ConfigDeepLink.parse(
             mapOf(
-                "provider" to "openai",
+                "provider" to "ark",
                 "api_key" to "sk-test-1234",
                 "base_url" to "https://example.com/v1",
                 "model" to "custom-model",
@@ -19,7 +19,7 @@ class ConfigDeepLinkTest {
         )
 
         val config = result.getOrThrow()
-        assertEquals(ConfigRepository.PROVIDER_OPENAI, config.provider)
+        assertEquals(ConfigRepository.PROVIDER_ARK, config.provider)
         assertEquals("sk-test-1234", config.apiKey)
         assertEquals("https://example.com/v1", config.baseUrl)
         assertEquals("custom-model", config.model)
@@ -27,29 +27,18 @@ class ConfigDeepLinkTest {
     }
 
     @Test
-    fun `Anthropic config defaults missing model and base URL`() {
-        val result = ConfigDeepLink.parse(
-            mapOf(
-                "provider" to "anthropic",
-                "api_key" to "anthropic-key"
-            )
-        )
-
-        val config = result.getOrThrow()
-        assertEquals(ConfigRepository.PROVIDER_ANTHROPIC, config.provider)
-        assertEquals(ConfigRepository.DEFAULT_ANTHROPIC_MODEL, config.model)
-        assertEquals(ConfigRepository.DEFAULT_ANTHROPIC_BASE_URL, config.baseUrl)
+    fun `missing provider means Ark and missing model and URL get the defaults`() {
+        val config = ConfigDeepLink.parse(mapOf("api_key" to "ark-key")).getOrThrow()
+        assertEquals(ConfigRepository.PROVIDER_ARK, config.provider)
+        assertEquals(ConfigRepository.DEFAULT_MODEL, config.model)
+        assertEquals(ConfigRepository.DEFAULT_BASE_URL, config.baseUrl)
     }
 
     @Test
-    fun `Ollama accepts missing API key`() {
-        val result = ConfigDeepLink.parse(mapOf("provider" to "ollama"))
-
-        val config = result.getOrThrow()
-        assertEquals(ConfigRepository.PROVIDER_OLLAMA, config.provider)
-        assertEquals("", config.apiKey)
-        assertEquals(ConfigRepository.DEFAULT_OLLAMA_MODEL, config.model)
-        assertEquals(ConfigRepository.DEFAULT_OLLAMA_BASE_URL, config.baseUrl)
+    fun `providers that are no longer supported are rejected`() {
+        for (provider in listOf("openai", "anthropic", "ollama", "kimi")) {
+            assertTrue(provider, ConfigDeepLink.parse(mapOf("provider" to provider, "api_key" to "k")).isFailure)
+        }
     }
 
     @Test
@@ -65,8 +54,8 @@ class ConfigDeepLinkTest {
     }
 
     @Test
-    fun `non-Ollama missing API key is rejected`() {
-        val result = ConfigDeepLink.parse(mapOf("provider" to "openai"))
+    fun `missing API key is rejected`() {
+        val result = ConfigDeepLink.parse(mapOf("provider" to "ark"))
 
         assertTrue(result.isFailure)
     }
@@ -75,7 +64,7 @@ class ConfigDeepLinkTest {
     fun `zero max steps is rejected`() {
         val result = ConfigDeepLink.parse(
             mapOf(
-                "provider" to "openai",
+                "provider" to "ark",
                 "api_key" to "sk-test",
                 "max_steps" to "0"
             )
@@ -88,7 +77,7 @@ class ConfigDeepLinkTest {
     fun `large max steps is accepted`() {
         val result = ConfigDeepLink.parse(
             mapOf(
-                "provider" to "openai",
+                "provider" to "ark",
                 "api_key" to "sk-test",
                 "max_steps" to "1000"
             )
@@ -101,7 +90,7 @@ class ConfigDeepLinkTest {
     fun `key and url aliases are accepted`() {
         val result = ConfigDeepLink.parse(
             mapOf(
-                "provider" to "openai",
+                "provider" to "ark",
                 "key" to "sk-alias",
                 "url" to "https://alias.example/v1"
             )

@@ -28,13 +28,13 @@ class ActionRepeatGuard(
         val previous = lastExecutedAction ?: return Decision.Allow
         val blockReason = when {
             isRepeatedTypeText(previous, candidate) -> {
-                LlmPrompts.guardFeedback("repeated_type_text")
+                AgentPrompts.REPEATED_TYPE_TEXT
             }
             isRepeatedSubmit(previous, candidate) && screenLooksUnchanged(currentScreen) -> {
-                LlmPrompts.guardFeedback("repeated_submit")
+                AgentPrompts.REPEATED_SUBMIT
             }
             isRepeatedTapLike(previous, candidate) && screenLooksUnchanged(currentScreen) -> {
-                LlmPrompts.guardFeedback("repeated_tap")
+                AgentPrompts.REPEATED_TAP
             }
             else -> null
         }
@@ -91,9 +91,9 @@ class ActionRepeatGuard(
 
     private fun buildFeedback(reason: String): String {
         val escalation = if (consecutiveBlocks >= 2) {
-            LlmPrompts.guardFeedback("escalation_high")
+            AgentPrompts.ESCALATION_HIGH
         } else {
-            LlmPrompts.guardFeedback("escalation_low")
+            AgentPrompts.ESCALATION_LOW
         }
         return "$reason$escalation"
     }

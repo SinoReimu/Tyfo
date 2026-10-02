@@ -1,93 +1,72 @@
 package com.shiro.tyfo.fixtures
 
 import com.shiro.tyfo.engine.StepResult
+import com.shiro.tyfo.llm.LlmReply
+import com.shiro.tyfo.llm.ToolCall
+import org.json.JSONArray
+import org.json.JSONObject
 
-fun buildFinishResponse(thought: String = "task done"): Map<String, Any?> = mapOf(
-    "action_type" to "finish",
-    "thought" to thought
-)
+private var callCounter = 0
 
-fun buildTapResponse(x: Int, y: Int, thought: String = "tapping"): Map<String, Any?> = mapOf(
-    "action_type" to "tap",
-    "thought" to thought,
-    "x" to x,
-    "y" to y
-)
+/** One tool call as the model would send it. Pairs become [x, y] arrays. */
+fun toolCall(name: String, args: Map<String, Any?> = emptyMap()): ToolCall {
+    val json = JSONObject()
+    args.forEach { (k, v) ->
+        when (v) {
+            null -> Unit
+            is Pair<*, *> -> json.put(k, JSONArray().put(v.first).put(v.second))
+            else -> json.put(k, v)
+        }
+    }
+    return ToolCall("call_${++callCounter}", name, json.toString())
+}
 
-fun buildLongPressResponse(x: Int, y: Int, thought: String = "long pressing"): Map<String, Any?> = mapOf(
-    "action_type" to "long_press",
-    "thought" to thought,
-    "x" to x,
-    "y" to y
-)
+/** A model reply: a narration sentence plus the given calls, in order. */
+fun reply(vararg calls: ToolCall, text: String? = "working on it") = LlmReply(text, calls.toList())
 
-fun buildOpenAppResponse(appName: String, thought: String = "opening app"): Map<String, Any?> = mapOf(
-    "action_type" to "open_app",
-    "thought" to thought,
-    "app_name" to appName
-)
+private fun single(name: String, narration: String, vararg args: Pair<String, Any?>) =
+    reply(toolCall(name, mapOf(*args)), text = narration)
+
+fun buildFinishResponse(answer: String = "task done", success: Boolean = true, narration: String = "done"): LlmReply =
+    single("finish", narration, "answer" to answer, "success" to success)
+
+fun buildTapResponse(x: Int, y: Int, narration: String = "tapping"): LlmReply =
+    single("tap", narration, "point" to (x to y))
+
+fun buildLongPressResponse(x: Int, y: Int, narration: String = "long pressing"): LlmReply =
+    single("long_press", narration, "point" to (x to y))
+
+fun buildOpenAppResponse(appName: String, narration: String = "opening app"): LlmReply =
+    single("open_app", narration, "app_name" to appName)
 
 fun buildSwipeResponse(
     startX: Int, startY: Int, endX: Int, endY: Int,
-    durationMs: Int? = null, thought: String = "swiping"
-): Map<String, Any?> = mapOf(
-    "action_type" to "swipe",
-    "thought" to thought,
-    "start_x" to startX,
-    "start_y" to startY,
-    "end_x" to endX,
-    "end_y" to endY,
-    "duration_ms" to durationMs
-)
+    durationMs: Int? = null, narration: String = "swiping"
+): LlmReply = single("swipe", narration, "from" to (startX to startY), "to" to (endX to endY), "duration_ms" to durationMs)
 
-fun buildTypeTextResponse(text: String, thought: String = "typing"): Map<String, Any?> = mapOf(
-    "action_type" to "type_text",
-    "thought" to thought,
-    "text" to text
-)
+fun buildTypeTextResponse(text: String, submit: Boolean = false, narration: String = "typing"): LlmReply =
+    single("type_text", narration, "text" to text, "submit" to submit)
 
-fun buildKeyEventResponse(key: String, thought: String = "pressing key"): Map<String, Any?> = mapOf(
-    "action_type" to "key_event",
-    "thought" to thought,
-    "key" to key
-)
+fun buildKeyEventResponse(key: String, narration: String = "pressing key"): LlmReply =
+    single("press_key", narration, "key" to key)
 
-fun buildWaitResponse(thought: String = "waiting"): Map<String, Any?> = mapOf(
-    "action_type" to "wait",
-    "thought" to thought
-)
+fun buildWaitResponse(narration: String = "waiting"): LlmReply =
+    single("wait", narration, "seconds" to 1)
 
-fun buildFailResponse(reason: String, thought: String = "failing"): Map<String, Any?> = mapOf(
-    "action_type" to "fail",
-    "thought" to thought,
-    "reason" to reason
-)
+fun buildFailResponse(reason: String, narration: String = "giving up"): LlmReply =
+    buildFinishResponse(reason, success = false, narration = narration)
 
-fun buildAskUserResponse(question: String, thought: String = "asking user"): Map<String, Any?> = mapOf(
-    "action_type" to "ask_user",
-    "thought" to thought,
-    "question" to question
-)
+fun buildAskUserResponse(question: String, narration: String = "asking user"): LlmReply =
+    single("ask_user", narration, "question" to question)
 
-fun buildNoteResponse(note: String, thought: String = "noting"): Map<String, Any?> = mapOf(
-    "action_type" to "note",
-    "thought" to thought,
-    "note" to note
-)
+fun buildNoteResponse(key: String, value: String, narration: String = "noting"): LlmReply =
+    single("note", narration, "key" to key, "value" to value)
 
-fun buildHandoffResponse(reason: String, thought: String = "handing off"): Map<String, Any?> = mapOf(
-    "action_type" to "handoff_user",
-    "thought" to thought,
-    "handoff_reason" to reason
-)
+fun buildHandoffResponse(reason: String, narration: String = "handing off"): LlmReply =
+    single("handoff_user", narration, "reason" to reason)
 
-fun buildRememberResponse(key: String, value: String, category: String = "", thought: String = "remembering"): Map<String, Any?> = mapOf(
-    "action_type" to "remember",
-    "thought" to thought,
-    "memory_key" to key,
-    "memory_value" to value,
-    "memory_category" to category
-)
+fun buildRememberResponse(key: String, value: String, category: String = "", narration: String = "remembering"): LlmReply =
+    single("remember", narration, "key" to key, "value" to value, "category" to category)
 
 fun stepResult(
     step: Int = 1,

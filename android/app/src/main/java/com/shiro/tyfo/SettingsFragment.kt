@@ -62,7 +62,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         pairingManager = App.imPairingManager!!
 
         setupProfilePreference()
-        setupProviderPreference()
         setupTextSummaries()
         setupMaxStepsPreference()
         setupAutoSaveOnChange()
@@ -106,43 +105,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         editor.apply()
     }
 
-    // --- Provider auto-defaults ---
-
-    private fun setupProviderPreference() {
-        val providerPref = findPreference<ListPreference>("api_provider") ?: return
-        providerPref.onPreferenceChangeListener =
-            Preference.OnPreferenceChangeListener { _, newValue ->
-                val provider = newValue as String
-                val modelPref = findPreference<EditTextPreference>("model")
-                val urlPref = findPreference<EditTextPreference>("base_url")
-                val currentModel = modelPref?.text ?: ""
-                val currentUrl = urlPref?.text ?: ""
-                if (ConfigRepository.isDefaultModelOrUrl(currentModel, currentUrl)) {
-                    val (defModel, defUrl) = defaultsFor(provider)
-                    modelPref?.text = defModel
-                    urlPref?.text = defUrl
-                }
-                val active = config.activeProfileName
-                if (active.isNotEmpty()) {
-                    val curModel = modelPref?.text ?: ""
-                    val curUrl = urlPref?.text ?: ""
-                    profileRepo.saveProfile(ProviderProfile(active, provider, config.apiKey, curModel, curUrl))
-                    refreshProfileSummary()
-                }
-                true
-            }
-    }
-
-    private fun defaultsFor(provider: String): Pair<String, String> = when (provider) {
-        ConfigRepository.PROVIDER_ANTHROPIC ->
-            ConfigRepository.DEFAULT_ANTHROPIC_MODEL to ConfigRepository.DEFAULT_ANTHROPIC_BASE_URL
-        ConfigRepository.PROVIDER_OLLAMA ->
-            ConfigRepository.DEFAULT_OLLAMA_MODEL to ConfigRepository.DEFAULT_OLLAMA_BASE_URL
-        ConfigRepository.PROVIDER_KIMI ->
-            ConfigRepository.DEFAULT_KIMI_MODEL to ConfigRepository.DEFAULT_KIMI_BASE_URL
-        else -> ConfigRepository.DEFAULT_MODEL to ConfigRepository.DEFAULT_BASE_URL
-    }
-
     // --- Provider Profiles ---
 
     private fun setupProfilePreference() {
@@ -177,7 +139,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val activeProfileName = config.activeProfileName
 
         val names = profiles.map { it.name }.toMutableList()
-        val subtitles = profiles.map { "${it.provider} / ${it.model}" }.toMutableList()
+        val subtitles = profiles.map { "${it.model} · ${android.net.Uri.parse(it.baseUrl).host ?: it.baseUrl}" }.toMutableList()
         names.add(getString(R.string.profile_dialog_new))
         subtitles.add("")
 
@@ -272,7 +234,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun refreshAllProviderFields() {
-        findPreference<ListPreference>("api_provider")?.value = config.apiProvider
         findPreference<EditTextPreference>("model")?.text = config.model
         findPreference<EditTextPreference>("base_url")?.text = config.baseUrl
         findPreference<EditTextPreference>("api_key")?.text = config.apiKey

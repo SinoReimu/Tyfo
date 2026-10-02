@@ -1,253 +1,295 @@
 package com.shiro.tyfo.action
 
+import android.content.ClipboardManager
+import android.content.Context
+import android.view.WindowManager
+import com.shiro.tyfo.backend.PrivilegeBackend
+import com.shiro.tyfo.input.InputInjector
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.coVerifyOrder
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkConstructor
+import io.mockk.unmockkAll
+import io.mockk.verify
+import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 /**
- * Supplementary tests for Action sealed class parsing and properties.
- * Covers cases not already present in ActionTest.kt — primarily Note and Remember
- * action types, plus additional edge-case coverage.
+ * Tests for [ActionExecutor]: each [Action] reaches the right [InputInjector] / [AppLauncher] call
+ * and comes back as a [com.shiro.tyfo.engine.StepResult] the model can read.
  *
- * ActionExecutor itself requires Android Context and cannot be unit-tested without
- * instrumentation, so this file focuses on the Action data model layer.
+ * The injector and launcher are created inside the executor, so they're intercepted with
+ * mockkConstructor; the Context only needs to hand out the system services their constructors ask for.
  */
 class ActionExecutorTest {
 
-    // ── Note action property tests ──────────────────────────────────────────
+    private lateinit var context: Context
+    private val backend = mockk<PrivilegeBackend>(relaxed = true)
+
+    @Before
+    fun setUp() {
+        context = mockk(relaxed = true)
+        every { context.getSystemService(Context.CLIPBOARD_SERVICE) } returns mockk<ClipboardManager>(relaxed = true)
+        every { context.getSystemService(Context.WINDOW_SERVICE) } returns mockk<WindowManager>(relaxed = true)
+        mockkConstructor(InputInjector::class, AppLauncher::class)
+    }
+
+    @After
+    fun tearDown() {
+        unmockkAll()
+    }
+
+    private fun executor(
+        displayId: Int = 0,
+        blacklisted: Set<String> = emptySet(),
+        onOpenAppSuccess: ((String) -> Unit)? = null,
+    ) = ActionExecutor(
+        context, displayId,
+        onOpenAppSuccess = onOpenAppSuccess,
+        backend = backend,
+        blacklistedPackages = blacklisted,
+    )
+
+    // ── Data model ──────────────────────────────────────────────────────────
 
     @Test
-    fun `Note action has correct type name and properties`() {
-        val action = Action.Note(note = "User prefers dark mode", thought = "observed preference")
-        assertEquals("note", action.typeName)
-        assertEquals("User prefers dark mode", action.note)
-        assertEquals("observed preference", action.thought)
+    fun `actions carry their type names and defaults`() {
+        assertEquals("tap", Action.Tap(1, 2).typeName)
+        assertEquals("long_press", Action.LongPress(1, 2).typeName)
+        assertEquals("swipe", Action.Swipe(1, 2, 3, 4).typeName)
+        assertEquals("key_event", Action.KeyEvent("back").typeName)
+        assertEquals("type_text", Action.TypeText("a").typeName)
+        assertEquals("open_app", Action.OpenApp("a").typeName)
+        assertEquals("list_apps", Action.ListApps().typeName)
+        assertEquals("wait", Action.Wait().typeName)
+        assertEquals(Action.SWIPE_DEFAULT_MS, Action.Swipe(1, 2, 3, 4).durationMs)
+        assertEquals(2, Action.Wait().seconds)
+        assertEquals(1000L, Action.LongPress(1, 2).durationMs)
+        assertFalse(Action.TypeText("a").submit)
+        assertEquals("", Action.Tap(1, 2).thought)
+    }
+
+    // ── Touch ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `tap forwards normalized coordinates and keeps the thought`() = runTest {
+        every { anyConstructed<InputInjector>().tap(120, 340) } returns true
+
+        val result = executor().execute(Action.Tap(120, 340, thought = "press OK"), step = 3)
+
+        assertTrue(result.success)
+        assertEquals(3, result.step)
+        assertEquals("tap", result.actionType)
+        assertEquals("press OK", result.thought)
+        assertEquals("Tapped at (120, 340)", result.detail)
+        assertFalse(result.completed)
     }
 
     @Test
-    fun `Note default thought is empty string`() {
-        val action = Action.Note(note = "some observation")
-        assertEquals("", action.thought)
-    }
+    fun `failed tap is reported as a failure`() = runTest {
+        every { anyConstructed<InputInjector>().tap(any(), any()) } returns false
 
-    // ── Note fromMap tests ──────────────────────────────────────────────────
+        val result = executor().execute(Action.Tap(1, 2), step = 1)
 
-    @Test
-    fun `fromMap parses note action with note field`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "note",
-            "note" to "Screen is showing a login form",
-            "thought" to "recording observation"
-        )
-        val action = Action.fromMap(map)
-        assertTrue(action is Action.Note)
-        val note = action as Action.Note
-        assertEquals("Screen is showing a login form", note.note)
-        assertEquals("recording observation", note.thought)
+        assertFalse(result.success)
     }
 
     @Test
-    fun `fromMap note falls back to thought when note field missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "note",
-            "thought" to "I notice the app crashed"
-        )
-        val action = Action.fromMap(map)
-        assertTrue(action is Action.Note)
-        assertEquals("I notice the app crashed", (action as Action.Note).note)
+    fun `long press forwards the point and duration`() = runTest {
+        coEvery { anyConstructed<InputInjector>().longPress(50, 60, 1500L) } returns true
+
+        val result = executor().execute(Action.LongPress(50, 60, durationMs = 1500L), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Long pressed at (50, 60)", result.detail)
+        coVerify { anyConstructed<InputInjector>().longPress(50, 60, 1500L) }
     }
 
     @Test
-    fun `fromMap note field takes priority over thought for note content`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "note",
-            "note" to "Explicit note content",
-            "thought" to "fallback thought"
-        )
-        val action = Action.fromMap(map) as Action.Note
-        assertEquals("Explicit note content", action.note)
-        assertEquals("fallback thought", action.thought)
-    }
+    fun `swipe forwards start, end and duration`() = runTest {
+        coEvery { anyConstructed<InputInjector>().swipe(620, 440, 620, 395, 800L) } returns true
 
-    // ── Remember action property tests ──────────────────────────────────────
+        val result = executor().execute(Action.Swipe(620, 440, 620, 395, 800L), step = 1)
 
-    @Test
-    fun `Remember action has correct type name and properties`() {
-        val action = Action.Remember(
-            key = "wifi_password",
-            value = "secret123",
-            category = "credential",
-            thought = "saving wifi info"
-        )
-        assertEquals("remember", action.typeName)
-        assertEquals("wifi_password", action.key)
-        assertEquals("secret123", action.value)
-        assertEquals("credential", action.category)
-        assertEquals("saving wifi info", action.thought)
+        assertTrue(result.success)
+        assertEquals("Swiped (620, 440) -> (620, 395) in 800ms", result.detail)
     }
 
     @Test
-    fun `Remember default thought and category are empty strings`() {
-        val action = Action.Remember(key = "city", value = "Tokyo")
-        assertEquals("", action.thought)
-        assertEquals("", action.category)
+    fun `injector exception becomes a failed step with the message`() = runTest {
+        every { anyConstructed<InputInjector>().tap(any(), any()) } throws IllegalStateException("boom")
+
+        val result = executor().execute(Action.Tap(1, 2), step = 1)
+
+        assertFalse(result.success)
+        assertEquals("Error: boom", result.detail)
     }
 
-    // ── Remember fromMap tests ──────────────────────────────────────────────
+    // ── Keys and text ───────────────────────────────────────────────────────
 
     @Test
-    fun `fromMap parses remember action with all fields`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "remember",
-            "memory_key" to "user_name",
-            "memory_value" to "Alice",
-            "memory_category" to "identity",
-            "thought" to "user introduced herself"
-        )
-        val action = Action.fromMap(map)
-        assertTrue(action is Action.Remember)
-        val remember = action as Action.Remember
-        assertEquals("user_name", remember.key)
-        assertEquals("Alice", remember.value)
-        assertEquals("identity", remember.category)
-        assertEquals("user introduced herself", remember.thought)
+    fun `key event is injected on the physical display`() = runTest {
+        every { anyConstructed<InputInjector>().keyEvent("home") } returns true
+
+        val result = executor(displayId = 0).execute(Action.KeyEvent("home"), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Key event: home", result.detail)
     }
 
     @Test
-    fun `fromMap remember defaults missing fields to empty strings`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "remember",
-            "thought" to "saving"
-        )
-        val action = Action.fromMap(map) as Action.Remember
-        assertEquals("", action.key)
-        assertEquals("", action.value)
-        assertEquals("", action.category)
+    fun `home and recent are rejected on a virtual display without injecting`() = runTest {
+        for (key in listOf("home", "recent")) {
+            val result = executor(displayId = 7).execute(Action.KeyEvent(key), step = 1)
+            assertFalse("$key should be rejected", result.success)
+            assertTrue(result.detail.contains("open_app"))
+        }
+        verify(exactly = 0) { anyConstructed<InputInjector>().keyEvent(any()) }
     }
 
     @Test
-    fun `fromMap remember with only key and value`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "remember",
-            "memory_key" to "fav_color",
-            "memory_value" to "blue"
-        )
-        val action = Action.fromMap(map) as Action.Remember
-        assertEquals("fav_color", action.key)
-        assertEquals("blue", action.value)
-        assertEquals("", action.category)
-        assertEquals("", action.thought)
-    }
+    fun `delete reaches the injector on a virtual display`() = runTest {
+        every { anyConstructed<InputInjector>().keyEvent("delete") } returns true
 
-    // ── Trim whitespace in note action_type ─────────────────────────────────
+        val result = executor(displayId = 7).execute(Action.KeyEvent("delete"), step = 1)
 
-    @Test
-    fun `fromMap trims spaces in note action_type`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to " note ",
-            "note" to "observation",
-            "thought" to "noting"
-        )
-        val action = Action.fromMap(map)
-        assertTrue("Expected Note but got ${action::class.simpleName}", action is Action.Note)
-        assertEquals("observation", (action as Action.Note).note)
+        assertTrue(result.success)
+        assertEquals("Key event: delete", result.detail)
+        verify { anyConstructed<InputInjector>().keyEvent("delete") }
     }
 
     @Test
-    fun `fromMap trims spaces in handoff_user action_type`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "  handoff_user  ",
-            "handoff_reason" to "password required",
-            "thought" to "sensitive"
-        )
-        val action = Action.fromMap(map)
-        assertTrue("Expected HandoffUser but got ${action::class.simpleName}", action is Action.HandoffUser)
-        assertEquals("password required", (action as Action.HandoffUser).reason)
+    fun `back still works on a virtual display`() = runTest {
+        every { anyConstructed<InputInjector>().keyEvent("back") } returns true
+
+        val result = executor(displayId = 7).execute(Action.KeyEvent("back"), step = 1)
+
+        assertTrue(result.success)
     }
 
     @Test
-    fun `fromMap trims spaces in long_press action_type`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to " long_press ",
-            "x" to 50,
-            "y" to 60,
-            "thought" to "hold it"
-        )
-        val action = Action.fromMap(map)
-        assertTrue("Expected LongPress but got ${action::class.simpleName}", action is Action.LongPress)
-        assertEquals(50, (action as Action.LongPress).x)
-        assertEquals(60, action.y)
-    }
+    fun `type text forwards the whole string without pressing enter`() = runTest {
+        coEvery { anyConstructed<InputInjector>().typeText("你好 world") } returns true
 
-    // ── Edge cases ──────────────────────────────────────────────────────────
+        val result = executor().execute(Action.TypeText("你好 world"), step = 1)
 
-    @Test
-    fun `fromMap fail defaults reason to unknown reason when reason missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "fail",
-            "thought" to "something bad happened"
-        )
-        val action = Action.fromMap(map) as Action.Fail
-        assertEquals("unknown reason", action.reason)
-        assertEquals("something bad happened", action.thought)
+        assertTrue(result.success)
+        assertEquals("Typed: 你好 world", result.detail)
+        verify(exactly = 0) { anyConstructed<InputInjector>().keyEvent(any()) }
     }
 
     @Test
-    fun `fromMap open_app defaults app_name to empty string when missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "open_app",
-            "thought" to "open something"
-        )
-        val action = Action.fromMap(map) as Action.OpenApp
-        assertEquals("", action.appName)
+    fun `type text with submit types and then presses enter`() = runTest {
+        coEvery { anyConstructed<InputInjector>().typeText("电池") } returns true
+        every { anyConstructed<InputInjector>().keyEvent("enter") } returns true
+
+        val result = executor(displayId = 7).execute(Action.TypeText("电池", submit = true), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Typed: 电池 + enter", result.detail)
+        coVerifyOrder {
+            anyConstructed<InputInjector>().typeText("电池")
+            anyConstructed<InputInjector>().keyEvent("enter")
+        }
     }
 
     @Test
-    fun `fromMap swipe defaults duration when missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "swipe",
-            "start_x" to 500, "start_y" to 300, "end_x" to 500, "end_y" to 700,
-            "thought" to "scroll"
-        )
-        val action = Action.fromMap(map) as Action.Swipe
-        assertEquals(Action.SWIPE_DEFAULT_MS, action.durationMs)
+    fun `submit isn't pressed when typing failed`() = runTest {
+        coEvery { anyConstructed<InputInjector>().typeText(any()) } returns false
+
+        val result = executor().execute(Action.TypeText("x", submit = true), step = 1)
+
+        assertFalse(result.success)
+        verify(exactly = 0) { anyConstructed<InputInjector>().keyEvent(any()) }
     }
 
     @Test
-    fun `fromMap key_event defaults key to back when missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "key_event",
-            "thought" to "press key"
-        )
-        val action = Action.fromMap(map) as Action.KeyEvent
-        assertEquals("back", action.key)
+    fun `a failed enter after typing fails the step`() = runTest {
+        coEvery { anyConstructed<InputInjector>().typeText(any()) } returns true
+        every { anyConstructed<InputInjector>().keyEvent("enter") } returns false
+
+        val result = executor().execute(Action.TypeText("x", submit = true), step = 1)
+
+        assertFalse(result.success)
     }
 
     @Test
-    fun `fromMap type_text defaults text to empty string when missing`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "type_text",
-            "thought" to "typing"
-        )
-        val action = Action.fromMap(map) as Action.TypeText
-        assertEquals("", action.text)
+    fun `wait sleeps for the requested seconds`() = runTest {
+        val result = executor().execute(Action.Wait(seconds = 3), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Waited 3s", result.detail)
+        assertEquals(3000L, testScheduler.currentTime)
+    }
+
+    // ── Apps ────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `open app reports the launch and notifies the launched package`() = runTest {
+        every { anyConstructed<AppLauncher>().launch("微信") } returns LaunchResult("Opened 微信", "com.tencent.mm")
+        val launched = mutableListOf<String>()
+
+        val result = executor(onOpenAppSuccess = { launched += it }).execute(Action.OpenApp("微信"), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Opened 微信", result.detail)
+        assertEquals(listOf("com.tencent.mm"), launched)
     }
 
     @Test
-    fun `fromMap unknown action type preserves thought in Fail`() {
-        val map = mapOf<String, Any?>(
-            "action_type" to "teleport",
-            "thought" to "I want to teleport"
-        )
-        val action = Action.fromMap(map) as Action.Fail
-        assertTrue(action.reason.contains("Unknown action type"))
-        assertTrue(action.reason.contains("teleport"))
-        assertEquals("I want to teleport", action.thought)
+    fun `open app that isn't found fails with the launcher's description`() = runTest {
+        every { anyConstructed<AppLauncher>().launch(any()) } returns LaunchResult("App not found: foo", null)
+
+        val result = executor().execute(Action.OpenApp("foo"), step = 1)
+
+        assertFalse(result.success)
+        assertEquals("App not found: foo", result.detail)
     }
 
     @Test
-    fun `fromMap with empty map returns Fail`() {
-        val map = emptyMap<String, Any?>()
-        val action = Action.fromMap(map)
-        assertTrue(action is Action.Fail)
+    fun `open app of a protected package is refused`() = runTest {
+        every { anyConstructed<AppLauncher>().launch(any()) } returns LaunchResult("Opened Bank", "com.bank")
+        val launched = mutableListOf<String>()
+
+        val result = executor(blacklisted = setOf("com.bank"), onOpenAppSuccess = { launched += it })
+            .execute(Action.OpenApp("Bank"), step = 1)
+
+        assertFalse(result.success)
+        assertEquals("Cannot open protected app: Bank", result.detail)
+        assertTrue(launched.isEmpty())
+    }
+
+    @Test
+    fun `list apps with a keyword lists the matches`() = runTest {
+        every { anyConstructed<AppLauncher>().listApps("map") } returns listOf("Maps", "高德地图")
+
+        val result = executor().execute(Action.ListApps("map"), step = 1)
+
+        assertTrue(result.success)
+        assertEquals("Installed apps matching 'map' (2): Maps, 高德地图", result.detail)
+    }
+
+    @Test
+    fun `list apps without a match suggests another keyword`() = runTest {
+        every { anyConstructed<AppLauncher>().listApps("zzz") } returns emptyList()
+
+        val result = executor().execute(Action.ListApps("zzz"), step = 1)
+
+        assertTrue(result.success)
+        assertTrue(result.detail.startsWith("No apps found matching 'zzz'"))
+    }
+
+    @Test
+    fun `list apps without a keyword lists everything`() = runTest {
+        every { anyConstructed<AppLauncher>().listApps(null) } returns listOf("A", "B", "C")
+
+        val result = executor().execute(Action.ListApps(""), step = 1)
+
+        assertEquals("Installed apps (3): A, B, C", result.detail)
     }
 }

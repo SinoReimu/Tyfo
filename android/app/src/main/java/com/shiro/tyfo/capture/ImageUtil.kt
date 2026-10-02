@@ -55,10 +55,10 @@ object ImageUtil {
         return Base64.encodeToString(toJpegBytes(bitmap, quality), Base64.NO_WRAP)
     }
 
-    fun processScreenshotToBytes(bitmap: Bitmap): ByteArray {
-        val resized = resizeToMaxWidth(bitmap)
+    fun processScreenshotToBytes(bitmap: Bitmap, maxWidth: Int = MAX_WIDTH, quality: Int = JPEG_QUALITY): ByteArray {
+        val resized = resizeToMaxWidth(bitmap, maxWidth)
         val rgb = convertToRgb(resized)
-        val bytes = toJpegBytes(rgb)
+        val bytes = toJpegBytes(rgb, quality)
         if (rgb !== resized) rgb.recycle()
         if (resized !== bitmap) resized.recycle()
         return bytes

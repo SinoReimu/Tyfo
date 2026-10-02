@@ -39,7 +39,6 @@
     <string name="pref_app_blacklist">应用黑名单</string>
     <string name="pref_app_blacklist_summary">选择 AI 不可访问的应用</string>
     <string name="pref_app_blacklist_none">未设置黑名单应用</string>
-    <string name="pref_provider_title">服务商</string>
     <string name="pref_api_key_title">API Key</string>
     <string name="pref_masked_summary">点击编辑</string>
     <string name="pref_not_set">未设置</string>

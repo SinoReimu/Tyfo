@@ -21,7 +21,7 @@ data class ProviderProfile(
     companion object {
         fun fromJson(json: JSONObject): ProviderProfile = ProviderProfile(
             name = json.getString("name"),
-            provider = json.optString("provider", ConfigRepository.PROVIDER_OPENAI),
+            provider = json.optString("provider", ConfigRepository.PROVIDER_ARK),
             apiKey = json.optString("api_key", ""),
             model = json.optString("model", ConfigRepository.DEFAULT_MODEL),
             baseUrl = json.optString("base_url", ConfigRepository.DEFAULT_BASE_URL)

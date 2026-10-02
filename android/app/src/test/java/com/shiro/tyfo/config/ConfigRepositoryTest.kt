@@ -74,7 +74,7 @@ class ConfigRepositoryTest {
     @Test
     fun `first run seeds preset provider config`() {
         val repo = ConfigRepository(mockContext)
-        assertEquals(ConfigRepository.PRESET_PROVIDER, repo.apiProvider)
+        assertEquals(ConfigRepository.PROVIDER_ARK, repo.apiProvider)
         assertEquals(com.shiro.tyfo.BuildConfig.PRESET_API_KEY, repo.apiKey)
         assertEquals("ark-code-latest", repo.model)
         assertEquals("https://ark.cn-beijing.volces.com/api/plan/v3", repo.baseUrl)
@@ -82,16 +82,29 @@ class ConfigRepositoryTest {
 
     @Test
     fun `existing config is not overwritten by preset`() {
-        prefsStore["api_provider"] = "anthropic"
+        prefsStore["api_provider"] = "ark"
         prefsStore["model"] = "custom-model"
         val repo = ConfigRepository(mockContext)
-        assertEquals("anthropic", repo.apiProvider)
+        assertEquals("ark", repo.apiProvider)
         assertEquals("custom-model", repo.model)
     }
 
     @Test
-    fun `getter fallbacks still use OpenAI defaults when keys are missing`() {
+    fun `old providers are migrated to Ark keeping endpoint, key and model`() {
         prefsStore["api_provider"] = "openai"
+        prefsStore["api_key"] = "old-key"
+        prefsStore["model"] = "old-model"
+        prefsStore["base_url"] = "https://ark.cn-beijing.volces.com/api/v3"
+        val repo = ConfigRepository(mockContext)
+        assertEquals(ConfigRepository.PROVIDER_ARK, repo.apiProvider)
+        assertEquals("old-key", repo.apiKey)
+        assertEquals("old-model", repo.model)
+        assertEquals("https://ark.cn-beijing.volces.com/api/v3", repo.baseUrl)
+    }
+
+    @Test
+    fun `getter fallbacks use the Ark defaults when keys are missing`() {
+        prefsStore["api_provider"] = "ark"
         val repo = ConfigRepository(mockContext)
         assertEquals("", repo.apiKey)
         assertEquals(ConfigRepository.DEFAULT_MODEL, repo.model)
@@ -188,47 +201,13 @@ class ConfigRepositoryTest {
         verify(mockEditor).apply()
     }
 
-    // ── isDefaultModelOrUrl ───────────────────────────────────────────────────
-
-    @Test
-    fun `isDefaultModelOrUrl returns true for each known default model`() {
-        assertTrue(ConfigRepository.isDefaultModelOrUrl(ConfigRepository.DEFAULT_MODEL, ""))
-        assertTrue(ConfigRepository.isDefaultModelOrUrl(ConfigRepository.DEFAULT_ANTHROPIC_MODEL, ""))
-        assertTrue(ConfigRepository.isDefaultModelOrUrl(ConfigRepository.DEFAULT_OLLAMA_MODEL, ""))
-    }
-
-    @Test
-    fun `isDefaultModelOrUrl returns true for each known default base URL`() {
-        assertTrue(ConfigRepository.isDefaultModelOrUrl("", ConfigRepository.DEFAULT_BASE_URL))
-        assertTrue(ConfigRepository.isDefaultModelOrUrl("", ConfigRepository.DEFAULT_ANTHROPIC_BASE_URL))
-        assertTrue(ConfigRepository.isDefaultModelOrUrl("", ConfigRepository.DEFAULT_OLLAMA_BASE_URL))
-    }
-
-    @Test
-    fun `isDefaultModelOrUrl returns false for custom model and url`() {
-        assertFalse(ConfigRepository.isDefaultModelOrUrl("qwen3.6-plus", "https://custom.api.com/v1"))
-    }
-
-    @Test
-    fun `isDefaultModelOrUrl returns false for empty strings`() {
-        assertFalse(ConfigRepository.isDefaultModelOrUrl("", ""))
-    }
-
     // ── Settings persistence regression (spinner race condition) ──────────────
 
     @Test
-    fun `custom model is not classified as a default and survives provider change`() {
-        // Regression: spinner onItemSelected used to reset the model to provider
-        // defaults whenever the activity opened, overwriting user-set custom values.
-        // isDefaultModelOrUrl returning false for a custom model means SettingsActivity
-        // will NOT overwrite it when the provider spinner initialises.
-        val customModel = "qwen3.6-plus"
-        val customUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/custom"
-        assertFalse(ConfigRepository.isDefaultModelOrUrl(customModel, customUrl))
-
+    fun `custom model survives a restart`() {
         val repo = ConfigRepository(mockContext)
-        repo.model = customModel
-        assertEquals(customModel, repo.model)
+        repo.model = "doubao-seed-custom"
+        assertEquals("doubao-seed-custom", ConfigRepository(mockContext).model)
     }
 
     @Test
