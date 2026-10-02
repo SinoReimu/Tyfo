@@ -108,6 +108,7 @@ class ViewActivity : AppCompatActivity() {
     private lateinit var btnTakeover: TextView
     private lateinit var btnStop: TextView
     private lateinit var takeoverKeyboardProxy: EditText
+    private lateinit var btnKeyboard: ImageView
 
     private var lastAgentState: AgentState? = null
     private var handoffUi: HandoffUiState = HandoffUiState.Idle
@@ -123,8 +124,6 @@ class ViewActivity : AppCompatActivity() {
     private lateinit var voiceAnswerController: VoiceInputController
     private var voiceTestReceiverRegistered = false
     private var proxyTextMutation = false
-    private var takeoverTouchDownX = 0f
-    private var takeoverTouchDownY = 0f
     private var pendingShowControls = false
 
     private val voiceTestReceiver = object : BroadcastReceiver() {
@@ -214,6 +213,7 @@ class ViewActivity : AppCompatActivity() {
         btnTakeover = findViewById(R.id.btn_takeover)
         btnStop = findViewById(R.id.btn_stop)
         takeoverKeyboardProxy = findViewById(R.id.takeover_keyboard_proxy)
+        btnKeyboard = findViewById(R.id.btn_keyboard)
 
         fabIcon.showRing = true
         applyPalette()
@@ -264,6 +264,7 @@ class ViewActivity : AppCompatActivity() {
             navBottom = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
             imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
             placePanel()
+            renderKeyboardButton()
             insets
         }
 
@@ -294,10 +295,7 @@ class ViewActivity : AppCompatActivity() {
 
         // SurfaceView touch: forwards to VD in TAKEOVER mode
         surfaceView.setOnTouchListener { _, event ->
-            if (isTakeoverMode) {
-                forwardTouchToVD(event)
-                handleTakeoverTouchForKeyboard(event)
-            }
+            if (isTakeoverMode) forwardTouchToVD(event)
             true
         }
 
@@ -305,6 +303,7 @@ class ViewActivity : AppCompatActivity() {
         btnCollapse.setOnClickListener { collapsePanel() }
         btnBack.setOnClickListener { onBackToChat() }
         btnTakeover.setOnClickListener { toggleTakeover() }
+        btnKeyboard.setOnClickListener { toggleTakeoverKeyboard() }
         btnStop.setOnClickListener { stopAndReturn() }
 
         // 回答 / 补充输入框：单行输入法动作（发送），但内容长了自动折行
@@ -675,12 +674,38 @@ class ViewActivity : AppCompatActivity() {
         }
     }
 
+    /** 接管且卡片收起时才露出键盘按钮；贴着导航栏，键盘弹出时浮在键盘上方，打开时用强调色实心。 */
+    private fun renderKeyboardButton() {
+        val show = isTakeoverMode && !controlPanel.isExpanded
+        btnKeyboard.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show) return
+        val lp = btnKeyboard.layoutParams as FrameLayout.LayoutParams
+        val margin = maxOf(navBottom, imeBottom) + 10.dpToPx()
+        if (lp.bottomMargin != margin) {
+            lp.bottomMargin = margin
+            btnKeyboard.layoutParams = lp
+        }
+        val on = isTakeoverKeyboardShown()
+        btnKeyboard.imageTintList = ColorStateList.valueOf(if (on) palette.onAccent else palette.text)
+        btnKeyboard.background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (on) palette.accent else palette.surfaceLite)
+                if (!on) setStroke(maxOf(1, 1.dpToPx() / 2), palette.hairlineStrong)
+            },
+            null,
+        )
+    }
+
     private fun expandPanel() {
         if (controlPanel.isExpanded) return
         Log.i(TAG, "Bottom panel expanded")
+        hideTakeoverKeyboard()
         if (lastAgentState is AgentState.WaitingForUser) Log.i(TAG, "Ask user section restored")
         controlPanel.setExpanded(true)
         placePanel()
+        renderKeyboardButton()
         syncBackCallback()
     }
 
@@ -703,6 +728,7 @@ class ViewActivity : AppCompatActivity() {
         answerInput.clearFocus()
         controlPanel.setExpanded(false)
         placePanel()
+        renderKeyboardButton()
         syncBackCallback()
         Log.i(TAG, "Bottom panel collapsed")
     }
@@ -852,6 +878,7 @@ class ViewActivity : AppCompatActivity() {
         }
         applyGlowForState(lastAgentState)
         render()
+        renderKeyboardButton()
         Log.i(TAG, "Takeover mode: $takeover")
     }
 
@@ -950,21 +977,15 @@ class ViewActivity : AppCompatActivity() {
         })
     }
 
-    private fun handleTakeoverTouchForKeyboard(event: MotionEvent) {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                takeoverTouchDownX = event.x
-                takeoverTouchDownY = event.y
-            }
-            MotionEvent.ACTION_UP -> {
-                val dx = event.x - takeoverTouchDownX
-                val dy = event.y - takeoverTouchDownY
-                if (dx * dx + dy * dy < (12.dpToPx() * 12.dpToPx())) {
-                    showTakeoverKeyboard()
-                }
-            }
-        }
+    /**
+     * 接管时的键盘只由右下角按钮开关：虚拟屏里的输入框聚焦时系统不会弹键盘（虚拟屏不是顶层焦点屏），
+     * 而点一下画面也不知道点到的是不是输入框，所以不再随点击自动弹出。
+     */
+    private fun toggleTakeoverKeyboard() {
+        if (isTakeoverKeyboardShown()) hideTakeoverKeyboard() else showTakeoverKeyboard()
     }
+
+    private fun isTakeoverKeyboardShown(): Boolean = imeBottom > 0 && takeoverKeyboardProxy.hasFocus()
 
     private fun showTakeoverKeyboard() {
         if (!isTakeoverMode || controlPanel.isExpanded) return

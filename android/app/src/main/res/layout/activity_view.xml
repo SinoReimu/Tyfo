@@ -51,6 +51,19 @@
         android:padding="13dp"
         android:src="@drawable/ic_ui_back" />
 
+    <!-- Takeover only: opens / closes the keyboard that types into the agent screen
+         (bottom margin follows the nav bar or the keyboard, set from insets) -->
+    <ImageView
+        android:id="@+id/btn_keyboard"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:contentDescription="@string/vd_btn_keyboard"
+        android:padding="11dp"
+        android:src="@drawable/ic_assist_keyboard"
+        android:visibility="gone" />
+
     <com.shiro.tyfo.ui.fx.MorphPanelLayout
         android:id="@+id/control_panel"
         android:layout_width="match_parent"
