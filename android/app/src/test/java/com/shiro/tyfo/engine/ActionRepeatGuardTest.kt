@@ -146,4 +146,41 @@ class ActionRepeatGuardTest {
         assertTrue(base.isSimilarTo(oneBitDifferent))
         assertFalse(base.isSimilarTo(manyBitsDifferent))
     }
+
+    @Test
+    fun `a new line of text is a change even when the average hash matches`() {
+        val hash = 0x0f0f0f0f0f0f0f0fL
+        val before = ByteArray(ScreenFingerprint.GRID_WIDTH * ScreenFingerprint.GRID_HEIGHT) { 250.toByte() }
+        // One text line: a strip of 20 cells that gets darker by ~40 levels.
+        val withLine = before.copyOf().also { grid ->
+            for (x in 4 until 24) grid[30 * ScreenFingerprint.GRID_WIDTH + x] = 210.toByte()
+        }
+        // Cursor blink / clock tick: two cells.
+        val withBlink = before.copyOf().also { grid ->
+            grid[5] = 200.toByte()
+            grid[6] = 200.toByte()
+        }
+
+        assertFalse(ScreenFingerprint(hash, before).isSimilarTo(ScreenFingerprint(hash, withLine)))
+        assertTrue(ScreenFingerprint(hash, before).isSimilarTo(ScreenFingerprint(hash, withBlink)))
+    }
+
+    @Test
+    fun `repeated continue tap is allowed when the screen grew a line`() {
+        val hash = 0x0f0f0f0f0f0f0f0fL
+        val before = ByteArray(ScreenFingerprint.GRID_WIDTH * ScreenFingerprint.GRID_HEIGHT) { 250.toByte() }
+        val after = before.copyOf().also { grid ->
+            for (x in 4 until 24) grid[30 * ScreenFingerprint.GRID_WIDTH + x] = 210.toByte()
+        }
+        val guard = ActionRepeatGuard()
+        guard.recordExecuted(Action.Tap(500, 948), ScreenFingerprint(hash, before))
+
+        assertEquals(
+            ActionRepeatGuard.Decision.Allow,
+            guard.evaluate(Action.Tap(500, 948), ScreenFingerprint(hash, after))
+        )
+        assertTrue(
+            guard.evaluate(Action.Tap(500, 948), ScreenFingerprint(hash, before)) is ActionRepeatGuard.Decision.Block
+        )
+    }
 }
