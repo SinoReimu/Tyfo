@@ -33,9 +33,13 @@ class ActionTest {
 
     @Test
     fun `Swipe action has correct type name and properties`() {
-        val action = Action.Swipe(direction = "up", thought = "scroll up")
+        val action = Action.Swipe(500, 700, 500, 300, thought = "scroll up")
         assertEquals("swipe", action.typeName)
-        assertEquals("up", action.direction)
+        assertEquals(500, action.startX)
+        assertEquals(700, action.startY)
+        assertEquals(500, action.endX)
+        assertEquals(300, action.endY)
+        assertEquals(Action.SWIPE_DEFAULT_MS, action.durationMs)
     }
 
     @Test
@@ -127,12 +131,42 @@ class ActionTest {
     fun `fromMap parses swipe action`() {
         val map = mapOf<String, Any?>(
             "action_type" to "swipe",
-            "direction" to "down",
-            "thought" to "scroll"
+            "start_x" to 620, "start_y" to 440, "end_x" to 620, "end_y" to 395,
+            "duration_ms" to 800,
+            "thought" to "drag the hour wheel one row"
         )
         val action = Action.fromMap(map)
-        assertTrue(action is Action.Swipe)
-        assertEquals("down", (action as Action.Swipe).direction)
+        assertEquals(Action.Swipe(620, 440, 620, 395, 800L, "drag the hour wheel one row"), action)
+    }
+
+    @Test
+    fun `fromMap swipe accepts string coordinates and defaults duration`() {
+        val map = mapOf<String, Any?>(
+            "action_type" to "swipe",
+            "start_x" to "500", "start_y" to "700", "end_x" to "500", "end_y" to "300"
+        )
+        val action = Action.fromMap(map) as Action.Swipe
+        assertEquals(700, action.startY)
+        assertEquals(Action.SWIPE_DEFAULT_MS, action.durationMs)
+    }
+
+    @Test
+    fun `fromMap swipe clamps coordinates and duration`() {
+        val map = mapOf<String, Any?>(
+            "action_type" to "swipe",
+            "start_x" to 1200, "start_y" to -5, "end_x" to 500, "end_y" to 300,
+            "duration_ms" to 20000
+        )
+        val action = Action.fromMap(map) as Action.Swipe
+        assertEquals(1000, action.startX)
+        assertEquals(0, action.startY)
+        assertEquals(Action.SWIPE_MAX_MS, action.durationMs)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun `fromMap swipe without coordinates is rejected`() {
+        // The old direction-only form must fail so the model is told to resend with coordinates
+        Action.fromMap(mapOf("action_type" to "swipe", "direction" to "up"))
     }
 
     @Test
@@ -471,12 +505,12 @@ class ActionTest {
     fun `fromMap trims trailing spaces in action_type`() {
         val map = mapOf<String, Any?>(
             "action_type" to "swipe  ",
-            "direction" to "up",
+            "start_x" to 500, "start_y" to 700, "end_x" to 500, "end_y" to 300,
             "thought" to "swipe with trailing spaces"
         )
         val action = Action.fromMap(map)
         assertTrue("Expected Swipe but got ${action::class.simpleName}", action is Action.Swipe)
-        assertEquals("up", (action as Action.Swipe).direction)
+        assertEquals(300, (action as Action.Swipe).endY)
     }
 
     @Test

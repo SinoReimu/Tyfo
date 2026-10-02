@@ -105,8 +105,8 @@ class ActionRepeatGuardTest {
         guard.recordExecuted(Action.Wait(), sameScreen)
         assertTrue(guard.evaluate(Action.Wait(), sameScreen) is ActionRepeatGuard.Decision.Allow)
 
-        guard.recordExecuted(Action.Swipe("up"), sameScreen)
-        assertTrue(guard.evaluate(Action.Swipe("up"), sameScreen) is ActionRepeatGuard.Decision.Allow)
+        guard.recordExecuted(Action.Swipe(500, 700, 500, 300), sameScreen)
+        assertTrue(guard.evaluate(Action.Swipe(500, 700, 500, 300), sameScreen) is ActionRepeatGuard.Decision.Allow)
     }
 
     @Test

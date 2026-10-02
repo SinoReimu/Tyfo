@@ -158,20 +158,25 @@ object ResponseParser {
         Regex("\"y\"\\s*:\\s*(\\d+)").find(text)?.let {
             map["y"] = it.groupValues[1].toIntOrNull() ?: return@let
         }
+        for (field in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
+            Regex("\"$field\"\\s*:\\s*(\\d+)").find(text)?.let {
+                map[field] = it.groupValues[1].toIntOrNull() ?: return@let
+            }
+        }
         // Extract completed (boolean)
         Regex("\"completed\"\\s*:\\s*(true|false)").find(text)?.let {
             map["completed"] = it.groupValues[1].toBoolean()
         }
 
         // Extract simple string fields (no embedded quotes expected)
-        for (field in listOf("app_name", "direction", "key", "text", "reason", "question", "note", "memory_key", "memory_value", "memory_category")) {
+        for (field in listOf("app_name", "key", "text", "reason", "question", "note", "memory_key", "memory_value", "memory_category")) {
             Regex("\"$field\"\\s*:\\s*\"([^\"]+)\"").find(text)?.let {
                 map[field] = it.groupValues[1]
             }
         }
 
         // Extract thought: grab everything between "thought":"..." up to the next known field
-        Regex("\"thought\"\\s*:\\s*\"(.*?)\"\\s*,\\s*\"(?:action_type|completed|x|y|app_name|direction|key|text|reason|question)\"",
+        Regex("\"thought\"\\s*:\\s*\"(.*?)\"\\s*,\\s*\"(?:action_type|completed|x|y|start_x|start_y|end_x|end_y|duration_ms|app_name|key|text|reason|question)\"",
             RegexOption.DOT_MATCHES_ALL).find(text)?.let {
             map["thought"] = it.groupValues[1]
         }

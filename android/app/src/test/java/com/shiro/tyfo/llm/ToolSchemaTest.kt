@@ -58,12 +58,9 @@ class ToolSchemaTest {
                         put("type", "integer")
                         put("description", "Y coordinate (0-1000)")
                     })
-                    put("direction", JSONObject().apply {
-                        put("type", "string")
-                        put("enum", JSONArray().apply {
-                            put("up"); put("down"); put("left"); put("right")
-                        })
-                    })
+                    for (key in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
+                        put(key, JSONObject().apply { put("type", "integer") })
+                    }
                     put("text", JSONObject().apply {
                         put("type", "string")
                         put("description", "Text to type")
@@ -179,18 +176,12 @@ class ToolSchemaTest {
     }
 
     @Test
-    fun `direction enum includes all directions`() {
+    fun `swipe parameters are integers`() {
         val schema = buildPhoneActionSchema()
         val properties = schema.getJSONObject("parameters").getJSONObject("properties")
-        val direction = properties.getJSONObject("direction")
-        val enumValues = direction.getJSONArray("enum")
-
-        val expected = setOf("up", "down", "left", "right")
-        val actual = mutableSetOf<String>()
-        for (i in 0 until enumValues.length()) {
-            actual.add(enumValues.getString(i))
+        for (key in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
+            assertEquals(key, "integer", properties.getJSONObject(key).getString("type"))
         }
-        assertEquals(expected, actual)
     }
 
     @Test
@@ -347,12 +338,14 @@ class ToolSchemaTest {
     }
 
     @Test
-    fun `swipe requires direction parameter with correct enum`() {
+    fun `swipe takes start, end and duration instead of a direction`() {
         val props = actualProperties()
-        assertTrue("Schema must have direction property", props.has("direction"))
-        val dirEnum = props.getJSONObject("direction").getJSONArray("enum")
-        val directions = (0 until dirEnum.length()).map { dirEnum.getString(it) }.toSet()
-        assertEquals(setOf("up", "down", "left", "right"), directions)
+        for (key in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
+            assertTrue("Schema must have $key property", props.has(key))
+            assertEquals(key, "integer", props.getJSONObject(key).getString("type"))
+            assertTrue("$key needs a description", props.getJSONObject(key).getString("description").isNotBlank())
+        }
+        assertFalse("direction was replaced by explicit coordinates", props.has("direction"))
     }
 
     @Test

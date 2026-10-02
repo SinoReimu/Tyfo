@@ -16,6 +16,7 @@ import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import com.shiro.tyfo.backend.PrivilegeBackend
 import com.shiro.tyfo.backend.SystemBackend
 import kotlinx.coroutines.delay
@@ -49,6 +50,11 @@ class InputInjector(
         private const val INJECT_MODE_ASYNC = 0
         // InputManager.INJECT_INPUT_EVENT_MODE_WAIT_FOR_FINISH = 2
         private const val INJECT_MODE_WAIT_FOR_FINISH = 2
+
+        /** Swipes this long or longer are slow drags: constant speed, then rest before lifting (no fling). */
+        const val SLOW_DRAG_MS = 600L
+        // VelocityTracker treats a pointer still for >40ms as stopped, so the release carries no velocity
+        private const val DRAG_SETTLE_MS = 150L
 
         /**
          * Inject a MotionEvent to a specific display.
@@ -251,6 +257,8 @@ class InputInjector(
 
     /**
      * Swipe from (nx1,ny1) to (nx2,ny2) in normalized coordinates.
+     * Shorter than [SLOW_DRAG_MS] it's a flick that keeps scrolling after release; from
+     * [SLOW_DRAG_MS] on it's a drag that stops where it lifts (wheel pickers, sliders).
      */
     suspend fun swipe(nx1: Int, ny1: Int, nx2: Int, ny2: Int, durationMs: Long = 300): Boolean {
         val start = coordinateMapper.normalizedToPixel(nx1, ny1)
@@ -267,6 +275,7 @@ class InputInjector(
     ): Boolean {
         val downTime = SystemClock.uptimeMillis()
         val mainHandler = Handler(Looper.getMainLooper())
+        val slowDrag = durationMs >= SLOW_DRAG_MS
 
         // DOWN (synchronous, wait for finish)
         val downEvent = obtainTouchEvent(downTime, downTime, MotionEvent.ACTION_DOWN, x1, y1)
@@ -279,7 +288,7 @@ class InputInjector(
             mainHandler.post {
                 var allInjected = true
                 val animator = ObjectAnimator.ofFloat(0f, 1f)
-                animator.interpolator = AccelerateDecelerateInterpolator()
+                animator.interpolator = if (slowDrag) LinearInterpolator() else AccelerateDecelerateInterpolator()
                 animator.duration = durationMs
                 animator.addUpdateListener { anim ->
                     val fraction = anim.animatedValue as Float
@@ -303,6 +312,14 @@ class InputInjector(
                 cont.invokeOnCancellation { animator.cancel() }
                 animator.start()
             }
+        }
+
+        if (slowDrag) {
+            // Rest at the end point so the view sees zero velocity and doesn't fling on release
+            delay(DRAG_SETTLE_MS)
+            val holdEvent = obtainTouchEvent(downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_MOVE, x2, y2)
+            injectEvent(holdEvent)
+            holdEvent.recycle()
         }
 
         // UP (synchronous, wait for finish)

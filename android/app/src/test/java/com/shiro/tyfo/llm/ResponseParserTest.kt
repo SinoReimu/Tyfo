@@ -350,11 +350,16 @@ That should do it."""
 
     @Test
     fun `extractFieldsFromMalformedJson handles extra commas`() {
-        val malformed = """{"thought":"swiping up","action_type":"swipe",,"direction":"up",,"completed":false,}"""
+        val malformed = """{"thought":"swiping up","action_type":"swipe",,"start_x":620,"start_y":700,,"end_x":620,"end_y":300,"duration_ms":800,"completed":false,}"""
         val result = ResponseParser.extractFieldsFromMalformedJson(malformed)
         assertNotNull("Should extract fields despite extra commas", result)
         assertEquals("swipe", result!!["action_type"])
-        assertEquals("up", result["direction"])
+        assertEquals("swiping up", result["thought"])
+        assertEquals(620, result["start_x"])
+        assertEquals(700, result["start_y"])
+        assertEquals(620, result["end_x"])
+        assertEquals(300, result["end_y"])
+        assertEquals(800, result["duration_ms"])
         assertEquals(false, result["completed"])
     }
 

@@ -638,7 +638,17 @@ class AgentEngine(
 
                 // === ACT ===
                 val t3 = System.currentTimeMillis()
-                val action = Action.fromMap(resultData)
+                // 模型偶尔给出缺字段的动作（如 tap 没有坐标），反馈给它重试，不要让整个任务失败
+                val action = try {
+                    Action.fromMap(resultData)
+                } catch (e: IllegalArgumentException) {
+                    val totalMs = System.currentTimeMillis() - stepStartTime
+                    pendingActionFeedback = String.format(LlmPrompts.agentFeedback("action_failed"), e.message)
+                    Log.w(TAG, "Step $step invalid action, will feed back to LLM: ${e.message}")
+                    _stepResults.emit(StepResult(step, actionType, thought, false, e.message ?: "", totalMs, false, debugInfo))
+                    delay(300)
+                    continue
+                }
                 _state.value = AgentState.Running(step, "Executing: $actionType")
 
                 when (val repeatDecision = actionRepeatGuard.evaluate(action, screenFingerprint)) {

@@ -23,8 +23,13 @@ sealed class Action(val typeName: String, open val thought: String) {
         override val thought: String = ""
     ) : Action("open_app", thought)
 
+    /** Finger moves from (startX, startY) to (endX, endY), 0-1000 normalized, over [durationMs]. */
     data class Swipe(
-        val direction: String,
+        val startX: Int,
+        val startY: Int,
+        val endX: Int,
+        val endY: Int,
+        val durationMs: Long = SWIPE_DEFAULT_MS,
         override val thought: String = ""
     ) : Action("swipe", thought)
 
@@ -94,12 +99,18 @@ sealed class Action(val typeName: String, open val thought: String) {
     ) : Action("save_routine", thought)
 
     companion object {
+        const val SWIPE_DEFAULT_MS = 300L
+        const val SWIPE_MIN_MS = 100L
+        const val SWIPE_MAX_MS = 3000L
+
         /**
          * Parse an Action from the LLM tool call result map.
          */
         private fun extractInt(value: Any?): Int? = when (value) {
             is Number -> value.toInt()
             is List<*> -> (value.firstOrNull() as? Number)?.toInt()
+            // 文本兜底解析出来的坐标可能是字符串，如 "x":"500"
+            is String -> value.trim().toDoubleOrNull()?.toInt()
             else -> null
         }
 
@@ -135,10 +146,19 @@ sealed class Action(val typeName: String, open val thought: String) {
                     appName = (map["app_name"] as? String) ?: "",
                     thought = thought
                 )
-                "swipe" -> Swipe(
-                    direction = (map["direction"] as? String) ?: "up",
-                    thought = thought
-                )
+                "swipe" -> {
+                    fun point(key: String) = extractInt(map[key])?.coerceIn(0, 1000)
+                        ?: throw IllegalArgumentException("swipe action missing required field '$key'")
+                    Swipe(
+                        startX = point("start_x"),
+                        startY = point("start_y"),
+                        endX = point("end_x"),
+                        endY = point("end_y"),
+                        durationMs = (extractInt(map["duration_ms"])?.toLong() ?: SWIPE_DEFAULT_MS)
+                            .coerceIn(SWIPE_MIN_MS, SWIPE_MAX_MS),
+                        thought = thought
+                    )
+                }
                 "key_event" -> KeyEvent(
                     key = (map["key"] as? String) ?: "back",
                     thought = thought

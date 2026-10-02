@@ -55,7 +55,7 @@ Memory rules:
 - For temporary task info (e.g., prices found during comparison, page state), use note in 'key: value' format — visible only in subsequent steps of the current task.
 - For stable long-term user preferences, frequently used info, or workflow habits, use remember(memory_key, memory_value, memory_category) — stored in global memory and visible in future tasks. Only use remember for confirmed long-term stable information.
 
-Available actions: tap(x,y), open_app(app_name), list_apps(keyword), swipe(direction), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
+Available actions: tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
 - list_apps(keyword): Search installed apps by keyword. Returns matching app names you can use with open_app. Use when open_app fails to find an app.
 - note action: Record important current task information (e.g., prices, model numbers), format 'key: value' (e.g., 'JD price: 5999 yuan'). Recorded info is visible in every subsequent step of this task.
 - You can also attach a note parameter when performing other actions (e.g., tap, open_app) to record info without a separate step.
@@ -90,7 +90,7 @@ Routine & schedule rules:
 - 临时任务信息（如本轮比价中查到的价格、页面状态）用 note，格式为 'key: value'，只在当前任务后续步骤可见。
 - 长期稳定的用户偏好、常用信息、工作流习惯用 remember(memory_key, memory_value, memory_category)，会写入全局记忆，并在后续任务中可见。只有确定是长期稳定信息时才 remember。
 
-可用操作：tap(x,y), open_app(app_name), list_apps(keyword), swipe(direction), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
+可用操作：tap(x,y), open_app(app_name), list_apps(keyword), swipe(start_x,start_y,end_x,end_y,duration_ms), key_event(key), type_text(text), wait, finish, fail, ask_user(question), handoff_user(handoff_reason), note, remember(memory_key,memory_value,memory_category), save_routine(routine_name, routine_icon, schedule_type, schedule_time, schedule_repeat, schedule_interval, schedule_location, schedule_on_enter)
 - list_apps(keyword)：按关键词搜索已安装的应用，返回匹配的应用名称列表，可配合 open_app 使用。当 open_app 找不到应用时使用。
 - note 操作：用于记录当前任务重要信息（如价格、型号），格式为 'key: value'（如 '京东价格: 5999元'）。记录的信息会在本任务后续每一步可见。
 - 你也可以在执行其他操作（如 tap、open_app）时同时附带 note 参数来记录信息，不需要单独一步。
@@ -112,7 +112,11 @@ Routine & schedule rules:
         "y" to "Tap y-coordinate, 0-1000 normalized",
         "app_name" to "App name to open (for open_app), e.g. settings",
         "keyword" to "Keyword to search installed apps (for list_apps), e.g. weather",
-        "direction" to "Swipe direction (for swipe)",
+        "start_x" to "Swipe start x-coordinate, 0-1000 normalized (for swipe)",
+        "start_y" to "Swipe start y-coordinate, 0-1000 normalized (for swipe)",
+        "end_x" to "Swipe end x-coordinate, 0-1000 normalized (for swipe)",
+        "end_y" to "Swipe end y-coordinate, 0-1000 normalized (for swipe)",
+        "duration_ms" to "Swipe duration in ms (for swipe), default 300",
         "key" to "Key name (for key_event)",
         "text" to "Text to input (for type_text)",
         "reason" to "Failure reason (for fail)",
@@ -142,7 +146,11 @@ Routine & schedule rules:
         "y" to "点击的y坐标，0-1000归一化",
         "app_name" to "要打开的应用名（open_app时使用），如 settings",
         "keyword" to "搜索已安装应用的关键词（list_apps时使用），如 天气",
-        "direction" to "滑动方向（swipe时使用）",
+        "start_x" to "滑动起点的x坐标，0-1000归一化（swipe时使用）",
+        "start_y" to "滑动起点的y坐标，0-1000归一化（swipe时使用）",
+        "end_x" to "滑动终点的x坐标，0-1000归一化（swipe时使用）",
+        "end_y" to "滑动终点的y坐标，0-1000归一化（swipe时使用）",
+        "duration_ms" to "滑动时长，毫秒（swipe时使用），默认300",
         "key" to "按键名（key_event时使用）",
         "text" to "要输入的文本（type_text时使用）",
         "reason" to "失败原因（fail时使用）",

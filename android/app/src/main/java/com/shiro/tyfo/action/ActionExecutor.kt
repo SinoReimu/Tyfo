@@ -35,17 +35,6 @@ class ActionExecutor(
     }
 
     /**
-     * Swipe direction -> (startNx, startNy, endNx, endNy).
-     * Ported from Python SWIPE_DIRECTIONS.
-     */
-    private val swipeDirections = mapOf(
-        "up" to intArrayOf(500, 700, 500, 300),
-        "down" to intArrayOf(500, 300, 500, 700),
-        "left" to intArrayOf(700, 500, 300, 500),
-        "right" to intArrayOf(300, 500, 700, 500)
-    )
-
-    /**
      * Execute an action and return a StepResult.
      */
 
@@ -88,15 +77,10 @@ class ActionExecutor(
                 }
 
                 is Action.Swipe -> {
-                    val coords = swipeDirections[action.direction.lowercase()]
-                    if (coords != null) {
-                        val ok = inputInjector.swipe(
-                            coords[0], coords[1], coords[2], coords[3]
-                        )
-                        ok to "Swiped ${action.direction}"
-                    } else {
-                        false to "Unknown swipe direction: ${action.direction}"
-                    }
+                    val ok = inputInjector.swipe(
+                        action.startX, action.startY, action.endX, action.endY, action.durationMs
+                    )
+                    ok to "Swiped (${action.startX}, ${action.startY}) -> (${action.endX}, ${action.endY}) in ${action.durationMs}ms"
                 }
 
                 is Action.KeyEvent -> {

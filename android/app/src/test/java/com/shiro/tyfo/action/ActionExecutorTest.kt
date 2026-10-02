@@ -202,13 +202,14 @@ class ActionExecutorTest {
     }
 
     @Test
-    fun `fromMap swipe defaults direction to up when missing`() {
+    fun `fromMap swipe defaults duration when missing`() {
         val map = mapOf<String, Any?>(
             "action_type" to "swipe",
+            "start_x" to 500, "start_y" to 300, "end_x" to 500, "end_y" to 700,
             "thought" to "scroll"
         )
         val action = Action.fromMap(map) as Action.Swipe
-        assertEquals("up", action.direction)
+        assertEquals(Action.SWIPE_DEFAULT_MS, action.durationMs)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.shiro.tyfo.input
 
+import com.shiro.tyfo.action.Action
 import org.junit.Assert.*
 import org.junit.Test
 import org.mockito.kotlin.*
@@ -43,27 +44,10 @@ class InputInjectorSwipeTest {
     }
 
     @Test
-    fun `swipe direction coordinates cover full gesture range`() {
-        // Verify the ActionExecutor's swipe directions produce meaningful pixel distances
-        // up: 500,700 -> 500,300 (vertical 400-unit swipe upward)
-        // down: 500,300 -> 500,700 (vertical 400-unit swipe downward)
-        // left: 700,500 -> 300,500 (horizontal 400-unit swipe left)
-        // right: 300,500 -> 700,500 (horizontal 400-unit swipe right)
-
-        val directions = mapOf(
-            "up" to intArrayOf(500, 700, 500, 300),
-            "down" to intArrayOf(500, 300, 500, 700),
-            "left" to intArrayOf(700, 500, 300, 500),
-            "right" to intArrayOf(300, 500, 700, 500)
-        )
-
-        for ((name, coords) in directions) {
-            val dx = coords[2] - coords[0]
-            val dy = coords[3] - coords[1]
-            val distance = Math.sqrt((dx * dx + dy * dy).toDouble())
-            // Each swipe should cover 400 normalized units
-            assertEquals("$name swipe distance", 400.0, distance, 0.1)
-        }
+    fun `default swipe is a flick and slow drags are reachable`() {
+        // A swipe without duration_ms flicks; the model can still ask for a slow drag within the allowed range
+        assertTrue(Action.SWIPE_DEFAULT_MS < InputInjector.SLOW_DRAG_MS)
+        assertTrue(InputInjector.SLOW_DRAG_MS in Action.SWIPE_MIN_MS..Action.SWIPE_MAX_MS)
     }
 
     @Test

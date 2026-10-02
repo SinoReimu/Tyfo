@@ -27,10 +27,17 @@ fun buildOpenAppResponse(appName: String, thought: String = "opening app"): Map<
     "app_name" to appName
 )
 
-fun buildSwipeResponse(direction: String, thought: String = "swiping"): Map<String, Any?> = mapOf(
+fun buildSwipeResponse(
+    startX: Int, startY: Int, endX: Int, endY: Int,
+    durationMs: Int? = null, thought: String = "swiping"
+): Map<String, Any?> = mapOf(
     "action_type" to "swipe",
     "thought" to thought,
-    "direction" to direction
+    "start_x" to startX,
+    "start_y" to startY,
+    "end_x" to endX,
+    "end_y" to endY,
+    "duration_ms" to durationMs
 )
 
 fun buildTypeTextResponse(text: String, thought: String = "typing"): Map<String, Any?> = mapOf(

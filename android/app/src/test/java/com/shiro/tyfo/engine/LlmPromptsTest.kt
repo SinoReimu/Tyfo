@@ -22,7 +22,8 @@ class LlmPromptsTest {
     @Test
     fun `paramDescription returns value for all known keys`() {
         val keys = listOf(
-            "thought", "action_type", "x", "y", "app_name", "direction",
+            "thought", "action_type", "x", "y", "app_name",
+            "start_x", "start_y", "end_x", "end_y", "duration_ms",
             "key", "text", "reason", "question", "handoff_reason",
             "note", "memory_key", "memory_value", "memory_category", "completed"
         )

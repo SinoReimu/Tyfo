@@ -50,16 +50,12 @@ object ToolSchema {
                         put("type", "string")
                         put("description", LlmPrompts.paramDescription("app_name"))
                     })
-                    put("direction", JSONObject().apply {
-                        put("type", "string")
-                        put("enum", JSONArray().apply {
-                            put("up")
-                            put("down")
-                            put("left")
-                            put("right")
+                    for (key in listOf("start_x", "start_y", "end_x", "end_y", "duration_ms")) {
+                        put(key, JSONObject().apply {
+                            put("type", "integer")
+                            put("description", LlmPrompts.paramDescription(key))
                         })
-                        put("description", LlmPrompts.paramDescription("direction"))
-                    })
+                    }
                     put("key", JSONObject().apply {
                         put("type", "string")
                         put("enum", JSONArray().apply {
