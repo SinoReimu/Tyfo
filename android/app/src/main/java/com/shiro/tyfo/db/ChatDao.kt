@@ -36,8 +36,12 @@ interface ChatDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun upsertSessionHistory(history: SessionHistoryEntity)
 
-    @Query("SELECT messages FROM session_history WHERE conversationId = :convId")
-    fun getSessionHistory(convId: Long): String?
+    @Query("SELECT length(messages) FROM session_history WHERE conversationId = :convId")
+    fun getSessionHistoryLength(convId: Long): Int?
+
+    /** 记录的一段：[start] 从 1 开始，按字符计（SQLite substr）。 */
+    @Query("SELECT substr(messages, :start, :length) FROM session_history WHERE conversationId = :convId")
+    fun getSessionHistoryChunk(convId: Long, start: Int, length: Int): String?
 
     @Insert
     fun insertMessage(msg: ChatMessageEntity)

@@ -7,6 +7,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 class ChatHistoryRepository(context: Context) {
+    private companion object {
+        /** 每次读的字符数：中文按 UTF-8 三字节算也远小于 2MB。 */
+        const val HISTORY_CHUNK_CHARS = 256 * 1024
+    }
+
     private val dao = AppDatabase.getInstance(context).chatDao()
 
     suspend fun startConversation(instruction: String): Long = withContext(Dispatchers.IO) {
@@ -44,8 +49,17 @@ class ChatHistoryRepository(context: Context) {
             dao.upsertSessionHistory(SessionHistoryEntity(conversationId, json, System.currentTimeMillis()))
         }
 
-    suspend fun getSessionHistory(conversationId: Long): String? =
-        withContext(Dispatchers.IO) { dao.getSessionHistory(conversationId) }
+    /** 整段记录不设上限，可能超过单次读取的上限（CursorWindow 约 2MB），所以分段读。 */
+    suspend fun getSessionHistory(conversationId: Long): String? = withContext(Dispatchers.IO) {
+        val length = dao.getSessionHistoryLength(conversationId) ?: return@withContext null
+        buildString {
+            var start = 1
+            while (start <= length) {
+                append(dao.getSessionHistoryChunk(conversationId, start, HISTORY_CHUNK_CHARS).orEmpty())
+                start += HISTORY_CHUNK_CHARS
+            }
+        }
+    }
 
     /** 会话列表，按最近活动排序；有改动（新会话、状态变化、删除）就重新发一次。 */
     fun observeConversations(): Flow<List<ConversationEntity>> = dao.observeConversations()

@@ -111,7 +111,8 @@ class AgentService : Service() {
     private class TaskStart(
         val conversationId: Long,
         val summary: String?,
-        val history: List<LlmMessage>,
+        /** 继续历史会话时：接到新任务前面的消息，以及存库时怎么接回整段历史。 */
+        val continuation: SessionHistory.Continuation?,
     )
 
     /** [startAgent] 的受理结果。 */
@@ -569,17 +570,17 @@ class AgentService : Service() {
                 val previous = continueConversationId?.let { historyRepo.getConversation(it) }
                 if (previous != null) {
                     val summary = ConversationContext.build(historyRepo.getMessages(previous.id))
-                    val history = historyRepo.getSessionHistory(previous.id)
-                        ?.let { SessionHistory.forContinuation(SessionHistory.decode(it)) }
-                        .orEmpty()
+                    val continuation = SessionHistory.forContinuation(
+                        historyRepo.getSessionHistory(previous.id)?.let(SessionHistory::decode).orEmpty()
+                    )
                     historyRepo.continueConversation(previous.id, instruction)
-                    Log.i(TAG, "Continuing conversation ${previous.id}: ${history.size} messages restored, summary ${summary?.length ?: 0} chars")
-                    TaskStart(previous.id, summary, history)
+                    Log.i(TAG, "Continuing conversation ${previous.id}: ${continuation.restored.size} messages restored, summary ${summary?.length ?: 0} chars")
+                    TaskStart(previous.id, summary, continuation)
                 } else {
                     val id = historyRepo.startConversation(instruction).also {
                         historyRepo.addMessage(it, MessageType.USER_INPUT, instruction)
                     }
-                    TaskStart(id, null, emptyList())
+                    TaskStart(id, null, null)
                 }
             }
             val convId = start.conversationId
@@ -620,7 +621,8 @@ class AgentService : Service() {
                 maxStepsMessage = { getString(R.string.task_max_steps, it) },
                 onTranscript = { transcript ->
                     scope.launch(historyWriter) {
-                        runCatching { historyRepo.saveSessionHistory(convId, SessionHistory.encode(transcript)) }
+                        val full = start.continuation?.merge(transcript) ?: transcript
+                        runCatching { historyRepo.saveSessionHistory(convId, SessionHistory.encode(full)) }
                             .onFailure { Log.w(TAG, "Failed to save session history: ${it.message}") }
                     }
                 },
@@ -630,7 +632,7 @@ class AgentService : Service() {
             currentConversationId = convId
             _engineFlow.value = newEngine
             observeConnectorState(b)
-            newEngine.start(instruction, start.summary, start.history)
+            newEngine.start(instruction, start.summary, start.continuation?.restored.orEmpty())
             taskStarting = false
             startJob = null
             taskStartedAt = System.currentTimeMillis()

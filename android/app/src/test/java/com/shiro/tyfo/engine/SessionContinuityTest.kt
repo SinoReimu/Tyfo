@@ -130,7 +130,7 @@ class SessionContinuityTest {
         engine2.start(
             "那明天呢",
             conversationContext = "User: 查一下天气\nResult: 上海今天晴，24°C",
-            history = SessionHistory.forContinuation(SessionHistory.decode(SessionHistory.encode(transcript))),
+            history = SessionHistory.forContinuation(SessionHistory.decode(SessionHistory.encode(transcript))).restored,
         )
         waitFor { (engine2.state.value as? AgentState.Idle)?.resultMessage != null }
 

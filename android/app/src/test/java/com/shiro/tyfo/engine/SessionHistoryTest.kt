@@ -39,6 +39,44 @@ class SessionHistoryTest {
         assertEquals(AgentPrompts.SCREENSHOT_OMITTED, (snapshot.single() as LlmMessage.User).text)
     }
 
+    /** 一个长任务：只有开头一条用户消息（任务指令），后面全是工具调用和结果。 */
+    private fun longTask(steps: Int) = listOf(LlmMessage.User("Task: finish today's Duolingo")) +
+        (1..steps).flatMap { listOf(assistant(call("c$it")), result("c$it")) }
+
+    @Test
+    fun `a long task is stored in full`() {
+        val task = longTask(steps = 500)
+        assertEquals(task, SessionHistory.snapshot(task))
+    }
+
+    @Test
+    fun `continuing after a long task sends its instruction and last steps`() {
+        val restored = SessionHistory.forContinuation(longTask(steps = 200)).restored
+        assertTrue(restored.size <= 61)
+        assertEquals(LlmMessage.User("Task: finish today's Duolingo"), restored.first())
+        assertTrue(restored[1] is LlmMessage.Assistant)
+        assertEquals(result("c200"), restored.last())
+    }
+
+    @Test
+    fun `saving a continued long task keeps the whole earlier history`() {
+        val stored = longTask(steps = 200)
+        val continuation = SessionHistory.forContinuation(stored)
+        val newTurn = listOf(LlmMessage.User("Task: one more lesson"), assistant(call("d1")), result("d1"))
+        // 引擎的记录 = 恢复的部分 + 这次的新消息
+        val saved = continuation.merge(continuation.restored + newTurn)
+        assertEquals(stored + newTurn, saved)
+    }
+
+    @Test
+    fun `saving a continued short session keeps everything once`() {
+        val stored = listOf(LlmMessage.User("u1"), assistant(call("c1")), result("c1"))
+        val continuation = SessionHistory.forContinuation(stored)
+        assertEquals(stored, continuation.restored)
+        val newTurn = listOf(LlmMessage.User("u2"), assistant(call("c2")), result("c2"))
+        assertEquals(stored + newTurn, continuation.merge(continuation.restored + newTurn))
+    }
+
     @Test
     fun `continuation starts at a user message and drops a trailing unanswered user message`() {
         val history = listOf(
@@ -50,7 +88,7 @@ class SessionHistoryTest {
             result("c2"),
             LlmMessage.User("u3 (stopped before the reply)"),
         )
-        val restored = SessionHistory.forContinuation(history)
+        val restored = SessionHistory.forContinuation(history).restored
         assertEquals(listOf(LlmMessage.User("u2"), assistant(call("c2")), result("c2")), restored)
     }
 
@@ -62,7 +100,7 @@ class SessionHistoryTest {
             assistant(call("c1", "note"), call("c2", "ask_user")),
             result("c1", "Noted.", "note"),
         )
-        val restored = SessionHistory.forContinuation(history)
+        val restored = SessionHistory.forContinuation(history).restored
         assertEquals(4, restored.size)
         val filled = restored.last() as LlmMessage.ToolResult
         assertEquals("c2", filled.callId)
@@ -74,7 +112,7 @@ class SessionHistoryTest {
     fun `orphan tool results are dropped`() {
         val restored = SessionHistory.forContinuation(
             listOf(LlmMessage.User("u1"), LlmMessage.Assistant("thinking"), result("nobody"))
-        )
+        ).restored
         assertEquals(listOf(LlmMessage.User("u1"), LlmMessage.Assistant("thinking")), restored)
     }
 
@@ -83,7 +121,7 @@ class SessionHistoryTest {
         val history = (1..200).flatMap { i ->
             listOf(LlmMessage.User("u$i"), assistant(call("c$i")), result("c$i"))
         }
-        val restored = SessionHistory.forContinuation(history)
+        val restored = SessionHistory.forContinuation(history).restored
         assertTrue(restored.size <= 60)
         assertEquals(result("c200"), restored.last())
         assertTrue(restored.first() is LlmMessage.User)
