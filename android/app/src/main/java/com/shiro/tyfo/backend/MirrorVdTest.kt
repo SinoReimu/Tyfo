@@ -12,7 +12,7 @@ import android.util.Log
  * Integration test for mirror VD capture.
  *
  * Run via:
- *   APK=$(adb shell pm path com.shiro.tyfo.standard | head -1 | sed 's/package://')
+ *   APK=$(adb shell pm path com.shiro.tyfo | head -1 | sed 's/package://')
  *   adb shell "CLASSPATH=$APK app_process /system/bin com.shiro.tyfo.backend.MirrorVdTest"
  *
  * Requires FLAG_SECURE demo app installed:

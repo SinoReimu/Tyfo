@@ -25,7 +25,6 @@
     <string name="handoff_sensitive_input">需要你在设备上完成敏感输入：%1$s</string>
     <string name="handoff_waiting_hint">等待你完成敏感输入…</string>
     <string name="handoff_reason_default">请在设备上完成敏感输入</string>
-    <string name="handoff_page_changed">页面已变化，Agent 接管中</string>
 
     <!-- Settings -->
     <string name="btn_manage_memory">管理记忆</string>

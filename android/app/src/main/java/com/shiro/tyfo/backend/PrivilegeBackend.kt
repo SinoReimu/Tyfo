@@ -27,6 +27,25 @@ interface PrivilegeBackend {
     fun destroy()
 }
 
+/**
+ * 还没连上特权后端（root / Shizuku / 无线 ADB）时的占位：什么都做不了，调用都返回失败。
+ * 普通应用自己没有注入输入、截屏、建虚拟屏的权限，这些都得经过 [RemoteBackend]。
+ */
+object NoBackend : PrivilegeBackend {
+    override val capabilities = BackendCapabilities.NONE
+    override fun injectInputEvent(event: InputEvent, displayId: Int, mode: Int) = false
+    override fun injectKeyEvent(action: Int, keyCode: Int, repeat: Int, metaState: Int, displayId: Int, mode: Int) = false
+    override fun captureScreen(displayId: Int, maxWidth: Int, quality: Int): ByteArray? = null
+    override fun createVirtualDisplay(name: String, width: Int, height: Int, dpi: Int, flags: Int) = -1
+    override fun releaseVirtualDisplay() {}
+    override fun setVirtualDisplaySurface(surface: Surface?) {}
+    override fun setDisplayImePolicy(displayId: Int, policy: Int) {}
+    override fun startActivityOnDisplay(intentUri: String, displayId: Int) = false
+    override fun getTopTaskIdOnDisplay(displayId: Int, callerPackage: String) = -1
+    override fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int) = false
+    override fun destroy() {}
+}
+
 data class BackendCapabilities(
     val name: String,
     val canInjectInput: Boolean,
@@ -48,7 +67,6 @@ data class BackendCapabilities(
             canCreateVirtualDisplay = mask and CAP_CREATE_VD != 0,
         )
 
-        val SYSTEM = BackendCapabilities("system", true, true, true, true)
         val NONE = BackendCapabilities("none", false, false, false, false)
     }
 }

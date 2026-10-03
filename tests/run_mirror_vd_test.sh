@@ -6,10 +6,10 @@
 #   ./tests/run_mirror_vd_test.sh -s SERIAL    # specific device
 #
 # Prerequisites:
-#   - Standard flavor APK installed (com.shiro.tyfo.standard)
+#   - Tyfo installed (com.shiro.tyfo)
 #   - FLAG_SECURE demo APK installed (com.shiro.tyfo.test.flagsecure)
 #   - Build both:
-#       cd android && ./gradlew :app:assembleStandardDebug :flagsecure-demo:assembleDebug
+#       cd android && ./gradlew :app:assembleDebug :flagsecure-demo:assembleDebug
 
 set -euo pipefail
 
@@ -21,18 +21,13 @@ fi
 adb() { command adb $SERIAL_FLAG "$@"; }
 
 # ── Resolve APK path ──
-PKG="com.shiro.tyfo.standard"
+PKG="com.shiro.tyfo"
 APK_PATH=$(adb shell pm path "$PKG" 2>/dev/null | head -1 | sed 's/package://')
-if [[ -z "$APK_PATH" ]]; then
-    # Fall back to non-standard package name
-    PKG="com.shiro.tyfo"
-    APK_PATH=$(adb shell pm path "$PKG" 2>/dev/null | head -1 | sed 's/package://')
-fi
 
 if [[ -z "$APK_PATH" ]]; then
     echo "ERROR: Tyfo not installed. Run:"
-    echo "  cd android && ./gradlew :app:assembleStandardDebug"
-    echo "  adb install app/build/outputs/apk/standard/debug/app-standard-debug.apk"
+    echo "  cd android && ./gradlew :app:assembleDebug"
+    echo "  adb install app/build/outputs/apk/debug/app-debug.apk"
     exit 1
 fi
 

@@ -203,7 +203,7 @@ class AppLauncher(
             Log.i(TAG, "Launching via backend.startActivityOnDisplay (display=$displayId)")
             return@asAgentLaunch backend!!.startActivityOnDisplay(intentUri, displayId)
         }
-        // Direct launch (system app or display 0)
+        // Direct launch on display 0
         context.startActivity(intent, launchOptionsBundle())
         true
     }
@@ -341,9 +341,8 @@ class AppLauncher(
     fun listApps(keyword: String? = null): List<String> {
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val ownPackages = setOf(context.packageName, "com.shiro.tyfo")
         return pm.queryIntentActivities(intent, 0)
-            .filter { it.activityInfo.packageName !in ownPackages }
+            .filter { it.activityInfo.packageName != context.packageName }
             .map { it.loadLabel(pm).toString() }
             .filter { label ->
                 keyword.isNullOrBlank() ||

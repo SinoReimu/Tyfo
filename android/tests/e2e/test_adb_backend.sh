@@ -1,16 +1,16 @@
 #!/bin/bash
-# E2E tests for ADB backend (standard flavor) on connected device
+# E2E tests for ADB backend on connected device
 # Usage: ./tests/e2e/test_adb_backend.sh [device_serial]
 #
 # Prerequisites:
-# - Device connected and paired with standard flavor
+# - Device connected and paired with Tyfo
 # - Ollama running at localhost:11434
-# - Standard flavor installed
+# - Tyfo installed (com.shiro.tyfo)
 
 set -e
 
 SERIAL="${1:-$(adb devices | grep -v "List\|^$" | head -1 | awk '{print $1}')}"
-PKG="com.shiro.tyfo.standard"
+PKG="com.shiro.tyfo"
 ACTIVITY="$PKG/com.shiro.tyfo.ui.ControlPanelActivity"
 SETUP_ACTIVITY="$PKG/com.shiro.tyfo.backend.SetupActivity"
 ADB="adb -s $SERIAL"

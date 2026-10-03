@@ -26,7 +26,7 @@ sleep 1
 # Clear logcat
 adb -s "$SERIAL" logcat -c
 
-# Grant overlay permission (system app may already have it)
+# Grant overlay permission
 adb -s "$SERIAL" shell appops set com.shiro.tyfo SYSTEM_ALERT_WINDOW allow 2>/dev/null || true
 
 echo "=== Device reset complete ==="

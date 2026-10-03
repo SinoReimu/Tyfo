@@ -76,9 +76,7 @@ OpenCyvis 是开源替代方案：你能看到每一行代码，你来选 AI 模
 
 ---
 
-## 两种安装模式
-
-### 标准模式
+## 安装
 
 适合大多数用户。不需要刷机，不需要 Root，不需要连接电脑。
 
@@ -92,16 +90,6 @@ OpenCyvis 是开源替代方案：你能看到每一行代码，你来选 AI 模
 > - 设置向导会引导你打开系统的「无线调试 → 使用配对码配对」。看到 6 位配对码后，**下拉通知栏**，在 OpenCyvis 的通知里直接输入配对码即可——不用切回 App。
 > - 部分国产 ROM（ColorOS / 一加、MIUI 等）会在切到后台后冻结应用。配对时如果系统弹出「允许后台运行 / 忽略电池优化」的提示，请选择**允许**，配对会更顺畅。
 > - 如果没看到带输入框的通知，手动下拉一次通知栏即可找到。
-
-### 系统 App 模式
-
-适合开发者和极客用户。
-
-刷入 AOSP 系统镜像，App 以系统应用身份运行，拥有最完整的平台签名权限。截屏使用 `SurfaceControl` 直接调用，速度最快。VD 任务管理走系统内部 API，稳定性最高。
-
-### 两种模式的关系
-
-核心 AI 引擎、LLM 后端、UI 界面、操作能力——两种模式完全一样。差异仅在底层：系统 App 直接调用系统 API，标准模式通过 ADB shell 或 Shizuku 权限获得同等能力。绝大多数日常场景下，用户感受不到区别。
 
 ---
 
@@ -182,20 +170,16 @@ OpenCyvis 不绑定模型。用户自行配置 LLM 后端。
 
 ## 架构
 
-两种安装模式共享全部上层代码，差异仅在权限层。通过 `PrivilegeBackend` 接口隔离：
+App 本身是普通应用。需要系统权限的操作都交给以 root、或经 Shizuku / 无线 ADB 以 shell 身份启动的 `PrivilegedService`，通过 `PrivilegeBackend` 接口（`RemoteBackend`）调用：
 
-| | SystemBackend | RemoteBackend |
-|---|---|---|
-| 权限来源 | 平台签名（uid system） | ADB shell 或 Shizuku |
-| 输入注入 | InputManager 反射 | AIDL 代理到 PrivilegedService |
-| 截屏 | SurfaceControl.screenshot() | ImageReader 从 VD Surface 读取 |
-| VD 任务管理 | ActivityTaskManager 反射 | PrivilegedService 代理 |
+| | RemoteBackend |
+|---|---|
+| 权限来源 | Root、Shizuku 或无线 ADB（shell） |
+| 输入注入 | AIDL 代理到 PrivilegedService |
+| 截屏 | 在 PrivilegedService 里截取 |
+| VD 任务管理 | PrivilegedService 代理 |
 
-运行时自动选择 Backend。
-
-<p align="center">
-  <img src="docs/demos/backend_architecture.png" width="500" alt="双 Backend 架构">
-</p>
+运行时自动选择连接方式（先 root，再 Shizuku，用户选了无线 ADB 时再试它）。
 
 ---
 
@@ -214,14 +198,13 @@ OpenCyvis 不绑定模型。用户自行配置 LLM 后端。
 
 ### 下载
 
-[Releases](https://github.com/opencyvis/opencyvis-phone/releases) 页面提供两种 APK：
+[Releases](https://github.com/opencyvis/opencyvis-phone/releases) 页面提供 APK：
 
 | APK | 适用 | 包名 |
 |:---|:---|:---|
 | `opencyvis-standard-release.apk` | 大多数用户 — 安装到任何 Android 11+ 手机 | `ai.opencyvis.standard` |
-| `opencyvis-system-release.apk` | 开发者 — 刷入 AOSP 作为系统应用 | `ai.opencyvis` |
 
-### 标准模式（推荐）
+### 安装 APK
 
 1. 下载 `opencyvis-standard-release.apk` 并安装
 2. 打开 App，选择 ADB 无线配对或 Shizuku
@@ -230,17 +213,13 @@ OpenCyvis 不绑定模型。用户自行配置 LLM 后端。
 
 使用内置 ADB 无线配对时，下拉通知栏并在 OpenCyvis 通知里输入 6 位配对码；若 ROM 提示允许后台运行，请选择允许。或者，设备上已运行 Shizuku 时，只需授予 OpenCyvis 权限，无需无线配对。
 
-### 系统 App 模式
-
-适用于构建自定义 AOSP 镜像的开发者：
+### 从源码构建
 
 ```bash
 git clone https://github.com/opencyvis/opencyvis-phone.git
 cd opencyvis-phone/android
-./gradlew assembleSystemRelease
+./gradlew assembleDebug
 ```
-
-部署到 AOSP 设备详见 [android/README-AOSP.md](android/README-AOSP.md)。
 
 ### 配置 LLM
 

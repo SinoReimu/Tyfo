@@ -7,7 +7,6 @@ __pycache__/
 android/.gradle/
 android/app/build/
 android/local.properties
-android/app/libs/framework-stubs.jar
 *.apk
 *.idsig
 .superpowers/

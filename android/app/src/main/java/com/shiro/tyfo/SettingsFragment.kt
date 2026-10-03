@@ -326,7 +326,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         val backendName = App.agentService?.activeBackendName
         statusPref.summary = when (backendName) {
-            "system"     -> "System App (full capabilities)"
             "root"       -> "Root — tap to change"
             "shizuku"    -> "Shizuku — tap to change"
             "adb-direct" -> "ADB Direct — tap to change"

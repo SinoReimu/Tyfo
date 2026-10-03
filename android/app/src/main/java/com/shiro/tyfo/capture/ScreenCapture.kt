@@ -5,7 +5,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import com.shiro.tyfo.backend.CaptureOps
 import com.shiro.tyfo.backend.PrivilegeBackend
-import com.shiro.tyfo.backend.SystemBackend
+import com.shiro.tyfo.backend.NoBackend
 
 /**
  * Orchestration layer for screen capture.
@@ -13,14 +13,13 @@ import com.shiro.tyfo.backend.SystemBackend
  * Handles JPEG encoding, base64 conversion, and VirtualDisplay bitmap passthrough.
  * Actual privileged capture is delegated to a [PrivilegeBackend].
  *
- * The [backend] field defaults to [SystemBackend] so existing callers work without
- * explicit initialization. Task 9 will set it properly during AgentService startup.
+ * [backend] is [NoBackend] until AgentService connects to the privileged backend.
  */
 object ScreenCapture {
 
     private const val TAG = "ScreenCapture"
 
-    @Volatile var backend: PrivilegeBackend = SystemBackend()
+    @Volatile var backend: PrivilegeBackend = NoBackend
 
     /**
      * Capture the default (physical) display and return as base64 JPEG.

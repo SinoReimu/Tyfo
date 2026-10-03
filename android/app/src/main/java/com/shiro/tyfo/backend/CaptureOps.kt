@@ -16,13 +16,14 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Low-level screen capture operations using reflection.
+ * Low-level screen capture operations using reflection. Runs inside [PrivilegedService]
+ * (root or shell uid), which holds the capture permissions.
  *
  * Strategy chain:
  * 1. ScreenCapture.capture() public API (API 36+, uses displayId, no token needed)
  * 2. ScreenCaptureInternal.captureDisplay() hidden API (API 36+, needs display token)
  * 3. SurfaceControl.screenshot() hidden API (API 30-35, needs display token)
- * 4. `screencap` command fallback (always works for system apps)
+ * 4. `screencap` command fallback
  *
  * For virtual displays (displayId != 0), only the API 36+ ScreenCapture API works.
  */
@@ -84,7 +85,7 @@ object CaptureOps {
      * goes through IWindowManager.screenCapture(), and returns a HardwareBuffer
      * directly (zero-copy from SurfaceFlinger).
      *
-     * Requires READ_FRAME_BUFFER permission (granted via privapp-permissions).
+     * Requires READ_FRAME_BUFFER permission (shell and root have it).
      * Gated behind FlaggedApi(readback_screenshot) -- may not be available on all builds.
      */
     private fun captureViaScreenCaptureApi(displayId: Int = 0): Bitmap? {
@@ -282,7 +283,7 @@ object CaptureOps {
 
     /**
      * Fallback: execute `screencap` command.
-     * Works for all system apps. Outputs PNG via pipe.
+     * Works from the shell or root uid. Outputs PNG via pipe.
      */
     private fun captureViaCommand(): Bitmap? {
         return try {

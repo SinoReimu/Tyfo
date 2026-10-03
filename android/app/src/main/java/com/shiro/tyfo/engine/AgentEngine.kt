@@ -87,7 +87,6 @@ class AgentEngine(
         private const val MAX_NOTES = 10
         private const val VD_CAPTURE_MAX_ATTEMPTS = 8
         private const val VD_CAPTURE_RETRY_DELAY_MS = 300L
-        private const val VD_IMAGE_READER_TIMEOUT_MS = 600L
         private const val VD_CAPTURE_RECOVERY_THRESHOLD = 3  // Check for an empty VD after this many failures
     }
 
@@ -766,35 +765,13 @@ class AgentEngine(
     }.trimEnd().take(2000)
 
     /**
-     * Capture a frame from the virtual display.
-     *
-     * Strategy:
-     * 1. ScreenCapture API (SurfaceFlinger, API 36+) — fast, works for most windows
-     * 2. If ScreenCapture returns null (API <36) or all-black (FLAG_SECURE),
-     *    fall back to ImageReader capture which reads directly from the VD's
-     *    own surface and works on all API levels.
+     * Capture a frame from the virtual display through the privileged backend.
      *
      * Recovery: with no app on the VD there may be no frame at all. After 3 consecutive
      * failures on an empty VD, hand the model a blank frame so it opens an app.
      */
     private suspend fun captureVirtualDisplay(vdm: VirtualDisplayManager, step: Int): String? {
         for (attempt in 1..VD_CAPTURE_MAX_ATTEMPTS) {
-            if (vdm.hasLocalDisplay) {
-                val irBitmap = withContext(Dispatchers.IO) {
-                    vdm.captureViaImageReader(timeoutMs = VD_IMAGE_READER_TIMEOUT_MS)
-                }
-                if (irBitmap != null) {
-                    Log.d(TAG, "Step $step: captured via local ImageReader (${irBitmap.width}x${irBitmap.height})")
-                    if (isBitmapBlack(irBitmap)) {
-                        Log.w(TAG, "ImageReader returned black frame (FLAG_SECURE?) — returning for handoff detection")
-                    }
-                    return ScreenCapture.captureBase64(virtualDisplayBitmap = irBitmap, maxWidth = shotWidth, quality = shotQuality)
-                }
-            } else {
-                Log.d(TAG, "Step $step: remote VD, skipping local ImageReader")
-            }
-
-            // Fallback 1: backend capture via Binder
             val backendBase64 = withContext(Dispatchers.IO) {
                 Log.d(TAG, "Step $step: trying backend capture (displayId=${vdm.displayId}, backend=${ScreenCapture.backend.javaClass.simpleName})")
                 ScreenCapture.captureBase64(displayId = vdm.displayId, maxWidth = shotWidth, quality = shotQuality)
@@ -826,25 +803,6 @@ class AgentEngine(
         }
         Log.w(TAG, "VD capture failed at step $step after $VD_CAPTURE_MAX_ATTEMPTS attempts")
         return null
-    }
-
-    /**
-     * Quick check if a bitmap is all-black (or nearly so).
-     * Samples a grid of pixels rather than checking every pixel.
-     */
-    private fun isBitmapBlack(bitmap: Bitmap): Boolean {
-        val w = bitmap.width
-        val h = bitmap.height
-        if (w == 0 || h == 0) return true
-        val sampleCount = 20
-        for (i in 0 until sampleCount) {
-            val x = (w * (i + 1)) / (sampleCount + 1)
-            val y = (h * (i + 1)) / (sampleCount + 1)
-            val pixel = bitmap.getPixel(x, y)
-            // Check if pixel has any non-black color (ignore alpha)
-            if ((pixel and 0x00FFFFFF) != 0) return false
-        }
-        return true
     }
 
     /**

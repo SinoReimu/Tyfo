@@ -25,7 +25,7 @@ import com.shiro.tyfo.backend.DetectionResult
 import com.shiro.tyfo.backend.PrivilegeBackend
 import com.shiro.tyfo.backend.RemoteBackend
 import com.shiro.tyfo.backend.SetupStateDetector
-import com.shiro.tyfo.backend.SystemBackend
+import com.shiro.tyfo.backend.NoBackend
 import com.shiro.tyfo.capture.ScreenCapture
 import com.shiro.tyfo.config.ConfigRepository
 import com.shiro.tyfo.db.ChatHistoryRepository
@@ -41,7 +41,6 @@ import com.shiro.tyfo.engine.AgentState
 import com.shiro.tyfo.engine.ConversationContext
 import com.shiro.tyfo.engine.SessionHistory
 import com.shiro.tyfo.engine.HandoffUiState
-import com.shiro.tyfo.engine.HandoffVisualDetector
 import com.shiro.tyfo.engine.ScreenFingerprint
 import com.shiro.tyfo.engine.StepResult
 import com.shiro.tyfo.engine.isTaskActive
@@ -273,7 +272,7 @@ class AgentService : Service() {
         scope.launch {
             historyRepo.markStaleRunningAsStopped()
         }
-        // Detect privilege backend (async for Shizuku, instant for system app)
+        // Detect privilege backend (root / Shizuku / wireless ADB)
         scope.launch {
             when (val result = BackendDetector.detect(this@AgentService)) {
                 is DetectionResult.Ready -> {
@@ -284,12 +283,11 @@ class AgentService : Service() {
                     Log.i(TAG, "Backend ready: ${result.backend.capabilities.name}")
                 }
                 is DetectionResult.SetupRequired -> {
-                    // Don't fall back to SystemBackend on standard flavor — it won't work
-                    backendDeferred.complete(SystemBackend()) // unblock startAgent (will fail gracefully)
+                    backendDeferred.complete(NoBackend) // unblock startAgent (will fail gracefully)
                     Log.w(TAG, "Backend setup required — user needs to complete setup wizard")
                 }
                 is DetectionResult.NoneAvailable -> {
-                    backendDeferred.complete(SystemBackend()) // unblock startAgent
+                    backendDeferred.complete(NoBackend) // unblock startAgent
                     Log.w(TAG, "No backend available — root not granted?")
                 }
             }
@@ -414,12 +412,12 @@ class AgentService : Service() {
                             if (!reconnected) {
                                 Log.w(TAG, "Auto-reconnect failed after 5 attempts")
                                 backend = null
-                                ScreenCapture.backend = SystemBackend()
+                                ScreenCapture.backend = NoBackend
                             }
                         } else {
                             Log.i(TAG, "Wireless debugging is off for ADB backend, clearing backend")
                             backend = null
-                            ScreenCapture.backend = SystemBackend()
+                            ScreenCapture.backend = NoBackend
                         }
                     }
                     is ConnectionState.Connected -> {
@@ -846,7 +844,7 @@ class AgentService : Service() {
         handoffMonitorJob?.cancel()
         releaseAgentWakeLock()
 
-        val b = backend ?: SystemBackend()
+        val b = backend ?: NoBackend
         var vdm = virtualDisplayManager
         if (vdm == null || !vdm.isCreated) {
             vdm?.destroy()
@@ -1049,54 +1047,20 @@ class AgentService : Service() {
         _handoffUiState.value = HandoffUiState.Active(reason)
         enterViewMode(showHandoff = true)
         enterTakeoverMode()
-        startHandoffVisualMonitor(reason)
+        startHandoffTimer(reason)
         updateNotification("Waiting for sensitive input")
     }
 
-    private fun startHandoffVisualMonitor(reason: String) {
+    /** 交接期间刷新已等待时长，到时限后进入倒计时把控制交回 Agent。 */
+    private fun startHandoffTimer(reason: String) {
         handoffMonitorJob?.cancel()
-        val vdm = virtualDisplayManager ?: return
-        val detector = HandoffVisualDetector()
+        if (virtualDisplayManager == null) return
         handoffMonitorJob = scope.launch {
             val startedAt = System.currentTimeMillis()
-            var baseline: HandoffVisualDetector.Fingerprint? = null
-            var stableTransitionCount = 0
 
             while (true) {
                 val elapsed = System.currentTimeMillis() - startedAt
                 _handoffUiState.value = HandoffUiState.Active(reason, elapsed)
-
-                val fingerprint = withContext(Dispatchers.IO) {
-                    val bitmap = vdm.captureViaImageReader(timeoutMs = 250)
-                    try {
-                        if (bitmap != null) detector.fingerprint(bitmap) else null
-                    } finally {
-                        bitmap?.recycle()
-                    }
-                }
-
-                if (fingerprint != null) {
-                    val base = baseline
-                    if (base == null || base.width != fingerprint.width || base.height != fingerprint.height) {
-                        baseline = fingerprint
-                        stableTransitionCount = 0
-                    } else if (detector.isHighConfidenceTransition(base, fingerprint)) {
-                        stableTransitionCount++
-                        if (stableTransitionCount >= 2) {
-                            Log.i(TAG, "Handoff visual monitor detected high-confidence transition")
-                            _handoffUiState.value = HandoffUiState.PendingReturn(
-                                reason = getString(R.string.handoff_page_changed),
-                                countdownSeconds = 0,
-                                source = "visual_change_stable"
-                            )
-                            delay(900L)
-                            completeUserHandoff("visual_change_stable")
-                            return@launch
-                        }
-                    } else {
-                        stableTransitionCount = 0
-                    }
-                }
 
                 if (elapsed >= HANDOFF_TIMEOUT_MS) {
                     showPendingHandoffReturn(reason, "timeout")
@@ -1135,7 +1099,7 @@ class AgentService : Service() {
     fun cancelPendingHandoffReturn() {
         val reason = activeHandoffReason.ifBlank { getString(R.string.handoff_reason_default) }
         Log.i(TAG, "Cancelling pending handoff return")
-        startHandoffVisualMonitor(reason)
+        startHandoffTimer(reason)
     }
 
     /**

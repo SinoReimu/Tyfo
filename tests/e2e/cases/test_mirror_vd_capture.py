@@ -5,8 +5,8 @@ capture fresh screenshots via the mirror VD's ImageReader, instead of getting
 stale cached frames from the main VD's ImageReader (which stops receiving frames
 when its surface is switched to SurfaceView).
 
-Only meaningful on standard flavor (ADB/RemoteBackend). On system flavor,
-the VD is local and captureViaImageReader handles the surface swap locally.
+The VD lives in the privileged service (RemoteBackend), so capture always goes
+through it.
 """
 
 from tests.e2e.framework import AgentTestCase

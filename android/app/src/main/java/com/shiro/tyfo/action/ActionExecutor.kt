@@ -3,7 +3,6 @@ package com.shiro.tyfo.action
 import android.content.Context
 import android.graphics.Point
 import com.shiro.tyfo.backend.PrivilegeBackend
-import com.shiro.tyfo.backend.SystemBackend
 import com.shiro.tyfo.engine.StepResult
 import com.shiro.tyfo.input.InputInjector
 import kotlinx.coroutines.delay
@@ -20,7 +19,7 @@ class ActionExecutor(
     private val displayId: Int = 0,
     displaySize: Point? = null,
     private val onOpenAppSuccess: ((packageName: String) -> Unit)? = null,
-    backend: PrivilegeBackend = SystemBackend(),
+    backend: PrivilegeBackend,
     private val blacklistedPackages: Set<String> = emptySet()
 ) {
 

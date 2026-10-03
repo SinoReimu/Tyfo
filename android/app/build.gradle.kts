@@ -17,20 +17,6 @@ android {
     // SDK 37 的平台包按小版本发布（platforms/android-37.0），要写明小版本号 AGP 才找得到
     compileSdkMinor = 0
 
-    // Platform signing: only enable if platform-key/platform.jks exists.
-    // Without it, builds use the default debug keystore.
-    val platformKeyFile = file("../platform-key/platform.jks")
-    if (platformKeyFile.exists()) {
-        signingConfigs {
-            create("platform") {
-                storeFile = platformKeyFile
-                storePassword = System.getenv("PLATFORM_STORE_PASSWORD") ?: "android"
-                keyAlias = System.getenv("PLATFORM_KEY_ALIAS") ?: "platform"
-                keyPassword = System.getenv("PLATFORM_KEY_PASSWORD") ?: "android"
-            }
-        }
-    }
-
     defaultConfig {
         applicationId = "com.shiro.tyfo"
         minSdk = 30  // Android 11+ for SurfaceControl.screenshot()
@@ -52,41 +38,15 @@ android {
     }
 
     lint {
-        // System app uses hidden APIs and runs on a known SDK — NewApi is a false positive.
+        // Hidden APIs are reached by reflection on a known SDK — NewApi is a false positive.
         abortOnError = false
     }
 
-    flavorDimensions += "privilege"
-    productFlavors {
-        create("system") {
-            dimension = "privilege"
-        }
-        create("standard") {
-            dimension = "privilege"
-            applicationIdSuffix = ".standard"
-        }
-    }
-
     buildTypes {
-        debug {
-            if (signingConfigs.findByName("platform") != null) {
-                signingConfig = signingConfigs.getByName("platform")
-            }
-        }
         release {
             isMinifyEnabled = false
-            if (signingConfigs.findByName("platform") != null) {
-                signingConfig = signingConfigs.getByName("platform")
-            }
-        }
-    }
-
-    // Standard flavor uses default debug keystore — not platform signing
-    androidComponents {
-        onVariants { variant ->
-            if (variant.flavorName == "standard") {
-                variant.signingConfig.setConfig(signingConfigs.getByName("debug"))
-            }
+            // 没有正式发布密钥，release 也用 debug 签名，跟 debug 包能互相覆盖安装
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

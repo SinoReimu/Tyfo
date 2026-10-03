@@ -13,14 +13,14 @@
 ```
 消费者 → PrivilegeBackend 接口
                 │
-        ┌───────┴───────┐
-   SystemBackend    RemoteBackend
-   (进程内反射)     (AIDL IPC 代理)
-                        │
-                  ServiceConnector
-                        │
-              ┌─────────┼──────────┐
-        ShizukuConnector  (未来: RootConnector, AdbDirectConnector)
+                │
+          RemoteBackend
+         (AIDL IPC 代理)
+                │
+         ServiceConnector
+                │
+     ┌──────────┼───────────┐
+RootConnector  ShizukuConnector  DirectConnector
 ```
 
 ### `PrivilegeBackend.kt`
@@ -38,12 +38,12 @@
 
 **BackendCapabilities：**
 - `fromProbeMask(mask, name)` — 从能力探测位掩码构造
-- 预置常量：`SYSTEM`（全能力）、`NONE`（无能力）
+- 预置常量：`NONE`（无能力）
 - 能力标志：`CAP_INJECT_INPUT`、`CAP_CAPTURE_SCREEN`、`CAP_CAPTURE_SECURE`、`CAP_CREATE_VD`
 
-### `SystemBackend.kt`
+### `NoBackend`（`PrivilegeBackend.kt`）
 
-进程内实现，uid 1000（平台签名系统应用）。委托给 InputOps/CaptureOps/DisplayOps 执行反射调用。
+还没连上特权后端时的占位：能力为 `NONE`，所有调用都返回失败。App 本身没有注入输入、截屏、建虚拟屏的权限，这些只能经过 `RemoteBackend`。
 
 ### `RemoteBackend.kt`
 
@@ -73,11 +73,10 @@
 - `SetupRequired(connectors)` — 需要用户设置
 - `NoneAvailable` — 没有可用后端
 
-优先级链：系统应用 (uid=1000) → Shizuku → DirectConnector(ADB 无线) → (未来: Root)
+优先级链：Root → Shizuku → DirectConnector(ADB 无线，仅在用户选了它之后)
 
 **主要方法：**
 ```kotlin
-fun isSystemUid(uid: Int = Process.myUid()): Boolean
 suspend fun detect(context: Context): DetectionResult
 ```
 
@@ -280,7 +279,7 @@ Apache-2.0 协议，来自 Shizuku 项目。提供完整的 ADB 无线传输栈�
 | `CaptureOps` | 截图策略链：ScreenCapture API 36+ → ScreenCaptureInternal → SurfaceControl → screencap |
 | `DisplayOps` | ActivityTaskManager 反射（任务管理）、IWindowManager 反射（IME 策略） |
 
-SystemBackend 和 PrivilegedService 共享这些 Ops 类 — 相同反射代码，区别仅在于执行进程。
+这些 Ops 类在 PrivilegedService 进程（root 或 shell uid）里执行；App 进程只用 `DisplayOps` 读任务信息的反射 helper。
 
 ---
 
@@ -321,10 +320,10 @@ private fun stripImagesFromHistory(messages: MutableList<Map<String, Any>>)
 - 防重：执行前调用 `ActionRepeatGuard.evaluate()`，拦截重复文本输入、屏幕无变化时的重复点击/Enter，并把反馈合入下一轮 user message
 
 **截图路径：**
-1. 优先使用 `ScreenCapture.captureBitmap(displayId)` (SurfaceFlinger, API 36+)
-2. 若返回 null（API <36，ScreenCapture API 不可用）或全黑帧（FLAG_SECURE 窗口），回退到 `VirtualDisplayManager.captureViaImageReader()` 直接从 VD Surface 读取
+1. 经特权后端截取 VD：`ScreenCapture.captureBase64(displayId)` → `RemoteBackend.captureScreen()`，在 PrivilegedService 里截图
+2. 全黑帧（FLAG_SECURE 窗口）照常返回，交给交接检测
 3. `captureBitmap()` 内部：当 `displayId != 0`（虚拟屏）时，跳过只能截取物理屏的降级方法（`captureViaScreenCaptureInternal`/`captureViaOldSurfaceControl`/`captureViaCommand`），避免错误截取主屏画面
-4. ImageReader 路径采用**监听器+缓存**机制（见 `VirtualDisplayManager`），即使 VD 静止画面（producer 没有新帧）也能拿到最新一帧；引擎再用 `VD_CAPTURE_MAX_ATTEMPTS=8` × `VD_CAPTURE_RETRY_DELAY_MS=300ms` 兜底活动转场抖动
+4. 引擎用 `VD_CAPTURE_MAX_ATTEMPTS=8` × `VD_CAPTURE_RETRY_DELAY_MS=300ms` 兜底活动转场抖动
 
 ---
 
@@ -813,11 +812,9 @@ AccessibilityService 实现，在每步截图时同时获取 VirtualDisplay 上�
 **默认配置：** 物理屏幕分辨率（`AgentService` 传入 `displayMetrics.widthPixels × heightPixels @densityDpi`，函数签名默认值 540×1170 @240dpi 仅作兜底）
 
 **技术细节：**
-- Surface：`ImageReader`（8 buffer，RGBA_8888）零拷贝帧访问，防止 agent 步骤间帧阻塞
-- **帧缓存（防静态画面饿死）：** 创建后通过 `OnImageAvailableListener` 在后台 `HandlerThread` 持续 drain `ImageReader`，把最新帧解码为 `Bitmap` 缓存到 `cachedBitmap`。`captureLatestBitmap()` 返回缓存的副本而不是直接调用 `acquireLatestImage()`。这样即使屏幕静止（producer 无新帧），截图仍能拿到最新画面。
-  > 修复前：`acquireLatestImage()` 仅在「上次 acquire 后有新帧」时返回非 null。两次 `open_app` 失败后 launcher 静止不变，连续 8 次重试全部返回 null，agent 任务被中断。
-- Flags（参考豆包 mFlags=120533）：`PUBLIC | SECURE | AUTO_MIRROR | SUPPORTS_TOUCH | ROTATES_WITH_CONTENT | SHOULD_SHOW_SYSTEM_DECORATIONS | TRUSTED | ALWAYS_UNLOCKED | OWN_FOCUS | STEAL_TOP_FOCUS_DISABLED | TOUCH_FEEDBACK_DISABLED`
-- `SHOULD_SHOW_SYSTEM_DECORATIONS` — VD 显示导航栏、状态栏、输入法
+- VD 建在 PrivilegedService 进程里（`RemoteBackend.createVirtualDisplay`），渲染到服务自己的 ImageReader，截图也在那边完成；没连上特权后端时 `create()` 直接返回 -1
+- Flags：`PUBLIC | OWN_CONTENT_ONLY | SUPPORTS_TOUCH | ROTATES_WITH_CONTENT | TRUSTED | OWN_DISPLAY_GROUP | DEVICE_DISPLAY_GROUP | ALWAYS_UNLOCKED | OWN_FOCUS | STEAL_TOP_FOCUS_DISABLED | TOUCH_FEEDBACK_DISABLED`，失败时逐步去掉 `ALWAYS_UNLOCKED` / `TRUSTED` 重试
+- 不用 `AUTO_MIRROR`（没有 TRUSTED 权限时 VD 会一直镜像主屏）；不用 `SHOULD_SHOW_SYSTEM_DECORATIONS`（Android 17 会在 VD 里放状态栏和 Taskbar）
 - `OWN_FOCUS` — VD 有独立焦点，不抢 Display 0 焦点
 - `ALWAYS_UNLOCKED` — VD 无需解锁
 - IME 策略：创建后调用 `IWindowManager.setDisplayImePolicy(DISPLAY_IME_POLICY_LOCAL=0)` 使键盘渲染在 VD 内部
@@ -826,15 +823,11 @@ AccessibilityService 实现，在每步截图时同时获取 VirtualDisplay 上�
 **主要方法：**
 ```kotlin
 fun create(width: Int, height: Int, dpi: Int): Int        // 返回 displayId，失败返回 -1
-fun captureLatestBitmap(): Bitmap?                          // 返回 cachedBitmap 的副本（由 listener 持续更新）
-fun captureViaImageReader(timeoutMs: Long = 150): Bitmap?   // 等待 listener 至少抓到一帧；从 SurfaceView 切回时先废弃缓存
-fun setSurface(surface: Surface?)                           // 切换渲染目标：SurfaceView(VIEW) ↔ ImageReader(BACKGROUND)
+fun setSurface(surface: Surface?)                           // 切换渲染目标：SurfaceView(VIEW) ↔ 服务的 ImageReader(BACKGROUND)
 fun getTopTaskIdOnDisplay(displayId: Int): Int?             // 获取指定 display 上的顶层非 AIPhone taskId
 fun getRunningTasks(limit: Int = 50): List<TaskSnapshot>    // 通过 ActivityTaskManager.getTasks() 获取 task/display 快照
 fun moveTaskToDisplay(taskId: Int, targetDisplayId: Int): Boolean  // 迁移任务到目标 display
-fun destroy()                                               // 释放 VD、ImageReader、HandlerThread、cachedBitmap
-private fun setDisplayImePolicy(dm, displayId: Int)         // 设置 IME 本地渲染策略（IWindowManager 反射）
-private fun imageToBitmap(image: Image): Bitmap?            // listener 回调内的解码 helper
+fun destroy()                                               // 让 PrivilegedService 释放 VD
 ```
 
 **属性：** `displayId`, `isCreated`, `width`, `height`, `isUsingExternalSurface`

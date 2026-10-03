@@ -10,7 +10,7 @@ import java.lang.reflect.Method
 /**
  * Reflection-based privileged operations for display/task management.
  *
- * Extracted from VirtualDisplayManager so that SystemBackend can delegate here
+ * Extracted from VirtualDisplayManager so that PrivilegedService can delegate here
  * and a future RemoteBackend can implement these over IPC instead.
  */
 object DisplayOps {

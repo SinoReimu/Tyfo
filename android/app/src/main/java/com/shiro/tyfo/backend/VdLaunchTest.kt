@@ -7,7 +7,7 @@ import android.util.Log
  * Minimal test for VD app launch with pre-move fix.
  *
  * Run via:
- *   APK=$(adb shell pm path com.shiro.tyfo.standard | head -1 | sed 's/package://')
+ *   APK=$(adb shell pm path com.shiro.tyfo | head -1 | sed 's/package://')
  *   adb shell "CLASSPATH=$APK app_process /system/bin com.shiro.tyfo.backend.VdLaunchTest"
  */
 object VdLaunchTest {

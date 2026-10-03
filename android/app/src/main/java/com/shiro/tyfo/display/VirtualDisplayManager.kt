@@ -2,20 +2,11 @@ package com.shiro.tyfo.display
 
 import com.shiro.tyfo.backend.DisplayOps
 import com.shiro.tyfo.backend.PrivilegeBackend
-import com.shiro.tyfo.backend.SystemBackend
+import com.shiro.tyfo.backend.RemoteBackend
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.ColorSpace
-import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.Image
-import android.media.ImageReader
-import android.os.Handler
-import android.os.HandlerThread
 import android.util.Log
 import android.view.Surface
-import java.nio.ByteBuffer
 
 data class TaskSnapshot(
     val taskId: Int,
@@ -33,12 +24,15 @@ data class TaskSnapshot(
  * Creates and manages a VirtualDisplay for agent operation.
  * The agent runs apps on this virtual screen while the user uses the physical screen.
  *
+ * The display lives in the privileged service process ([RemoteBackend]), which renders it
+ * into its own ImageReader and serves screenshots of it over Binder.
+ *
  * Supports task reparenting: moving Activity tasks between the VD and physical display
  * via moveTaskToDisplay() for view/takeover mode.
  */
 class VirtualDisplayManager(
     private val context: Context,
-    private val backend: PrivilegeBackend = SystemBackend()
+    private val backend: PrivilegeBackend
 ) {
 
     companion object {
@@ -52,7 +46,6 @@ class VirtualDisplayManager(
 
         // Hidden VirtualDisplay flags (not in public API)
         // VirtualDisplay flags: mFlags=120533
-        private const val VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR = 1 shl 4            // 16
         private const val VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 shl 6         // 64
         private const val VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT = 1 shl 7   // 128
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 shl 10              // 1024
@@ -64,32 +57,20 @@ class VirtualDisplayManager(
         private const val VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED = 1 shl 16 // 65536
     }
 
-    private var virtualDisplay: VirtualDisplay? = null
-    private var remoteVdDisplayId: Int = -1
-    private var imageReader: ImageReader? = null
-    private var readerHandlerThread: HandlerThread? = null
-    private var readerHandler: Handler? = null
-
-    private val cacheLock = Any()
-    private var cachedBitmap: Bitmap? = null
-
     /**
      * The display ID of the virtual display, or -1 if not created.
      */
-    val displayId: Int
-        get() = if (remoteVdDisplayId > 0) remoteVdDisplayId else virtualDisplay?.display?.displayId ?: -1
+    var displayId: Int = -1
+        private set
 
     val isCreated: Boolean
-        get() = virtualDisplay != null || remoteVdDisplayId > 0
+        get() = displayId > 0
 
-    val hasLocalDisplay: Boolean
-        get() = virtualDisplay != null
+    var width: Int = DEFAULT_WIDTH
+        private set
 
-    val width: Int
-        get() = imageReader?.width ?: DEFAULT_WIDTH
-
-    val height: Int
-        get() = imageReader?.height ?: DEFAULT_HEIGHT
+    var height: Int = DEFAULT_HEIGHT
+        private set
 
     // ── Task reparenting API (delegates to PrivilegeBackend) ──────────
 
@@ -133,7 +114,6 @@ class VirtualDisplayManager(
     fun isOwnPackage(task: TaskSnapshot): Boolean {
         val pkg = context.packageName
         return task.topPackage == pkg || task.basePackage == pkg
-                || task.topPackage == "com.shiro.tyfo" || task.basePackage == "com.shiro.tyfo"
     }
 
     private fun taskInfoToSnapshot(taskInfo: Any?): TaskSnapshot? {
@@ -174,93 +154,25 @@ class VirtualDisplayManager(
     var isUsingExternalSurface = false
         private set
 
-    private var externalSurface: Surface? = null
-
     /**
-     * Switch the VD's rendering target between SurfaceView and ImageReader.
-     * Pass a SurfaceView's surface to render VD content on Display 0 (VIEW mode).
-     * Pass null to switch back to ImageReader surface (BACKGROUND mode).
+     * Switch the VD's rendering target between a SurfaceView and the service's ImageReader.
+     * Pass a SurfaceView's surface to render VD content on Display 0 (VIEW mode); the Surface
+     * goes cross-process to the PrivilegedService. Pass null to switch back (BACKGROUND mode).
      *
-     * ScreenCapture API (SurfaceFlinger) is unaffected — it captures directly
-     * from the compositor regardless of which surface the VD renders to.
+     * Screenshots (SurfaceFlinger) are unaffected — they capture from the compositor
+     * regardless of which surface the VD renders to.
      */
     fun setSurface(surface: Surface?) {
-        val vd = virtualDisplay
-        if (vd != null) {
-            // Local VD — switch surface directly
-            if (surface != null) {
-                externalSurface = surface
-                isUsingExternalSurface = true
-                vd.surface = surface
-                Log.i(TAG, "VD surface switched to SurfaceView (local)")
-            } else {
-                externalSurface = null
-                isUsingExternalSurface = false
-                vd.surface = imageReader?.surface
-                Log.i(TAG, "VD surface switched back to ImageReader (local)")
-            }
-        } else if (remoteVdDisplayId > 0) {
-            // Remote VD — pass Surface cross-process to PrivilegedService
-            if (surface != null) {
-                externalSurface = surface
-                isUsingExternalSurface = true
-                backend.setVirtualDisplaySurface(surface)
-                Log.i(TAG, "VD surface switched to SurfaceView (remote)")
-            } else {
-                externalSurface = null
-                isUsingExternalSurface = false
-                backend.setVirtualDisplaySurface(null)
-                Log.i(TAG, "VD surface switched back to ImageReader (remote)")
-            }
-        }
-    }
-
-    /**
-     * Capture a frame via ImageReader, temporarily switching the VD surface
-     * from SurfaceView if needed. This bypasses SurfaceFlinger's FLAG_SECURE
-     * blackout since the ImageReader is the VD's own rendering surface.
-     *
-     * Returns null if no frame is available within the timeout.
-     */
-    fun captureViaImageReader(timeoutMs: Long = 150): Bitmap? {
-        val vd = virtualDisplay ?: return null
-        val reader = imageReader ?: return null
-        val wasExternal = isUsingExternalSurface
-        val savedSurface = externalSurface
-
-        try {
-            if (wasExternal) {
-                // Cache is stale (was populated before switching to SurfaceView) —
-                // drop it so we wait for a fresh frame from the listener.
-                val old: Bitmap?
-                synchronized(cacheLock) {
-                    old = cachedBitmap
-                    cachedBitmap = null
-                }
-                old?.recycle()
-                vd.surface = reader.surface
-            }
-
-            // Wait for a fresh frame
-            val deadline = System.currentTimeMillis() + timeoutMs
-            var bitmap: Bitmap? = captureLatestBitmap()
-            while (bitmap == null && System.currentTimeMillis() < deadline) {
-                Thread.sleep(16) // ~1 frame at 60fps
-                bitmap = captureLatestBitmap()
-            }
-            return bitmap
-        } finally {
-            if (wasExternal && savedSurface != null) {
-                // Restore SurfaceView
-                vd.surface = savedSurface
-            }
-        }
+        if (!isCreated) return
+        isUsingExternalSurface = surface != null
+        backend.setVirtualDisplaySurface(surface)
+        Log.i(TAG, if (surface != null) "VD surface switched to SurfaceView" else "VD surface switched back to ImageReader")
     }
 
     // ── VirtualDisplay lifecycle ─────────────────────────────────────────
 
     /**
-     * Create the virtual display with an ImageReader surface.
+     * Create the virtual display in the privileged service.
      * Returns the displayId or -1 on failure.
      */
     fun create(
@@ -268,151 +180,80 @@ class VirtualDisplayManager(
         height: Int = DEFAULT_HEIGHT,
         dpi: Int = DEFAULT_DPI
     ): Int {
-        if (virtualDisplay != null) {
+        if (isCreated) {
             Log.w(TAG, "Virtual display already created (displayId=$displayId)")
             return displayId
         }
+        if (backend !is RemoteBackend) {
+            Log.e(TAG, "No privileged backend connected — can't create the virtual display")
+            return -1
+        }
 
         try {
-            val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-
-            // ImageReader: 8 buffers, RGBA_8888 for direct Bitmap conversion.
-            // Large buffer count prevents stall between agent steps — frames produced
-            // between captures won't cause the producer to block.
-            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 8)
-
-            // Drain frames as they arrive on a background thread and cache the latest
-            // bitmap. acquireLatestImage() only returns NEW frames since last acquire,
-            // so on a static screen subsequent calls return null. The cache lets capture
-            // return the most recent frame even when the producer is idle.
-            readerHandlerThread = HandlerThread("VDImageReader").also { it.start() }
-            readerHandler = Handler(readerHandlerThread!!.looper)
-            imageReader!!.setOnImageAvailableListener({ reader ->
-                val image = try {
-                    reader.acquireLatestImage()
-                } catch (e: Exception) {
-                    Log.w(TAG, "acquireLatestImage in listener failed: ${e.message}")
-                    null
-                } ?: return@setOnImageAvailableListener
-                val bmp = try {
-                    imageToBitmap(image)
-                } finally {
-                    image.close()
-                }
-                if (bmp != null) {
-                    val old: Bitmap?
-                    synchronized(cacheLock) {
-                        old = cachedBitmap
-                        cachedBitmap = bmp
-                    }
-                    old?.recycle()
-                }
-            }, readerHandler)
-
-            // VD config flags — adapt based on backend capabilities.
             // No SHOULD_SHOW_SYSTEM_DECORATIONS: on Android 17 it puts a status bar and a
             // connected-display Taskbar (3-button nav piled onto dock icons) inside the VD.
-            // The remote VD gets home via VirtualDisplayConfig.setHomeSupported instead (see
+            // The VD gets home via VirtualDisplayConfig.setHomeSupported instead (see
             // PrivilegedService). A VD without home support can't host HOME, and HOME launched
             // at it lands on the phone's own screen, so never launch HOME onto the VD.
-            var flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
+            //
+            // No AUTO_MIRROR: without TRUSTED permission it makes the VD permanently mirror
+            // display 0 instead of showing independently launched activities.
+            // OWN_CONTENT_ONLY is required for OWN_DISPLAY_GROUP to stick: DMS turns a PUBLIC
+            // display into AUTO_MIRROR, and AUTO_MIRROR forces the default display group —
+            // where the VD powers off (renders black) whenever the phone screen turns off.
+            // DEVICE_DISPLAY_GROUP stays as a fallback: without some non-default group flag
+            // DMS drops ALWAYS_UNLOCKED.
+            val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
+                VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
+                VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT or
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
+                VIRTUAL_DISPLAY_FLAG_TRUSTED or
+                VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP or
+                VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED or
+                VIRTUAL_DISPLAY_FLAG_TOUCH_FEEDBACK_DISABLED or
+                VIRTUAL_DISPLAY_FLAG_OWN_FOCUS or
+                VIRTUAL_DISPLAY_FLAG_DEVICE_DISPLAY_GROUP or
+                VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED
+
+            // Try progressively reduced flag sets until VD creation succeeds
+            val flagSetsToTry = listOf(
+                flags,
+                // Without ALWAYS_UNLOCKED but keep TRUSTED
+                flags and VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED.inv(),
+                // Without TRUSTED but keep ALWAYS_UNLOCKED
+                flags and VIRTUAL_DISPLAY_FLAG_TRUSTED.inv(),
+                // Without both TRUSTED + ALWAYS_UNLOCKED
+                flags and (VIRTUAL_DISPLAY_FLAG_TRUSTED or VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED).inv(),
+                // Minimal: PUBLIC + SUPPORTS_TOUCH + ROTATES_WITH_CONTENT
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
                     VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
                     VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT
-
-            if (backend is com.shiro.tyfo.backend.SystemBackend) {
-                flags = flags or DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE or
-                    VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or
-                    VIRTUAL_DISPLAY_FLAG_TRUSTED or
-                    VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED or
-                    VIRTUAL_DISPLAY_FLAG_TOUCH_FEEDBACK_DISABLED or
-                    VIRTUAL_DISPLAY_FLAG_OWN_FOCUS or
-                    VIRTUAL_DISPLAY_FLAG_DEVICE_DISPLAY_GROUP or
-                    VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED
-            } else {
-                // For RemoteBackend (shell uid), DO NOT use AUTO_MIRROR.
-                // Without TRUSTED permission, AUTO_MIRROR causes the VD to permanently
-                // mirror display 0 instead of showing independently launched activities.
-                // OWN_CONTENT_ONLY is required for OWN_DISPLAY_GROUP to stick: DMS turns a PUBLIC
-                // display into AUTO_MIRROR, and AUTO_MIRROR forces the default display group —
-                // where the VD powers off (renders black) whenever the phone screen turns off.
-                // DEVICE_DISPLAY_GROUP stays as a fallback: without some non-default group flag
-                // DMS drops ALWAYS_UNLOCKED.
-                flags = flags or
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
-                    VIRTUAL_DISPLAY_FLAG_TRUSTED or
-                    VIRTUAL_DISPLAY_FLAG_OWN_DISPLAY_GROUP or
-                    VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED or
-                    VIRTUAL_DISPLAY_FLAG_TOUCH_FEEDBACK_DISABLED or
-                    VIRTUAL_DISPLAY_FLAG_OWN_FOCUS or
-                    VIRTUAL_DISPLAY_FLAG_DEVICE_DISPLAY_GROUP or
-                    VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED
-            }
-
-            // For RemoteBackend, create VD via the privileged service (shell uid has permissions).
-            // For SystemBackend, create locally (same process has permissions).
-            if (backend is com.shiro.tyfo.backend.RemoteBackend) {
-                // Try progressively reduced flag sets until VD creation succeeds
-                val flagSetsToTry = listOf(
-                    flags,
-                    // Without ALWAYS_UNLOCKED but keep TRUSTED
-                    flags and VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED.inv(),
-                    // Without TRUSTED but keep ALWAYS_UNLOCKED
-                    flags and VIRTUAL_DISPLAY_FLAG_TRUSTED.inv(),
-                    // Without both TRUSTED + ALWAYS_UNLOCKED
-                    flags and (VIRTUAL_DISPLAY_FLAG_TRUSTED or VIRTUAL_DISPLAY_FLAG_ALWAYS_UNLOCKED).inv(),
-                    // Minimal: PUBLIC + SUPPORTS_TOUCH + ROTATES_WITH_CONTENT
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
-                        VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
-                        VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT
-                )
-                var remoteDisplayId = -1
-                for ((idx, flagSet) in flagSetsToTry.withIndex()) {
-                    remoteDisplayId = backend.createVirtualDisplay(DISPLAY_NAME, width, height, dpi, flagSet)
-                    if (remoteDisplayId > 0) {
-                        Log.i(TAG, "VD created with flag set $idx (flags=0x${Integer.toHexString(flagSet)})")
-                        break
-                    }
-                    Log.w(TAG, "VD creation failed with flag set $idx (flags=0x${Integer.toHexString(flagSet)})")
-                }
-                if (remoteDisplayId <= 0) {
-                    Log.e(TAG, "Remote createVirtualDisplay failed (id=$remoteDisplayId)")
-                    destroy()
-                    return -1
-                }
-                remoteVdDisplayId = remoteDisplayId
-
-                // For RemoteBackend, the PrivilegedService keeps its own ImageReader
-                // and captures frames locally in the shell process. We retrieve screenshots
-                // via the Binder captureScreen() call. Cross-process Surface passing
-                // is unreliable on non-TRUSTED displays.
-                Log.i(TAG, "Remote VD created: displayId=$remoteDisplayId (capture via remote service)")
-
-                backend.setDisplayImePolicy(remoteDisplayId, 0)
-                // Note: keyguard dismissal is handled by the PrivilegedService (shell uid)
-                // immediately after VD creation via `wm dismiss-keyguard`.
-
-                return remoteDisplayId
-            }
-
-            virtualDisplay = dm.createVirtualDisplay(
-                DISPLAY_NAME, width, height, dpi,
-                imageReader!!.surface, flags
             )
-
-            val id = virtualDisplay?.display?.displayId ?: -1
-            if (id == -1) {
-                Log.e(TAG, "createVirtualDisplay returned null display")
-                destroy()
+            var id = -1
+            for ((idx, flagSet) in flagSetsToTry.withIndex()) {
+                id = backend.createVirtualDisplay(DISPLAY_NAME, width, height, dpi, flagSet)
+                if (id > 0) {
+                    Log.i(TAG, "VD created with flag set $idx (flags=0x${Integer.toHexString(flagSet)})")
+                    break
+                }
+                Log.w(TAG, "VD creation failed with flag set $idx (flags=0x${Integer.toHexString(flagSet)})")
+            }
+            if (id <= 0) {
+                Log.e(TAG, "Remote createVirtualDisplay failed (id=$id)")
                 return -1
             }
-
-            Log.i(TAG, "Virtual display created: displayId=$id, ${width}x${height} @${dpi}dpi")
+            displayId = id
+            this.width = width
+            this.height = height
+            Log.i(TAG, "VD created: displayId=$id, ${width}x${height} @${dpi}dpi (capture via remote service)")
 
             // Set IME policy to LOCAL so the keyboard renders inside the VD
             // (visible through SurfaceView in VIEW/TAKEOVER mode).
             // Without this, keyboard appears on Display 0 and input doesn't reach the VD.
             // DISPLAY_IME_POLICY_LOCAL = 0
             backend.setDisplayImePolicy(id, 0)
+            // Note: keyguard dismissal is handled by the PrivilegedService (shell uid)
+            // immediately after VD creation via `wm dismiss-keyguard`.
 
             return id
         } catch (e: Exception) {
@@ -423,113 +264,15 @@ class VirtualDisplayManager(
     }
 
     /**
-     * Return a copy of the most recent frame captured by the OnImageAvailableListener.
-     * Returns null if no frame has been received yet (e.g. immediately after create()
-     * or right after switching back from an external surface).
-     */
-    fun captureLatestBitmap(): Bitmap? {
-        synchronized(cacheLock) {
-            val src = cachedBitmap ?: return null
-            if (src.isRecycled) return null
-            val cfg = src.config ?: Bitmap.Config.ARGB_8888
-            return src.copy(cfg, false)
-        }
-    }
-
-    private fun imageToBitmap(image: Image): Bitmap? {
-        try {
-            val hardwareBuffer = image.hardwareBuffer
-            if (hardwareBuffer != null) {
-                try {
-                    val hardwareBitmap = Bitmap.wrapHardwareBuffer(
-                        hardwareBuffer,
-                        ColorSpace.get(ColorSpace.Named.SRGB)
-                    )
-                    val copy = hardwareBitmap?.copy(Bitmap.Config.ARGB_8888, false)
-                    hardwareBitmap?.recycle()
-                    if (copy != null) return copy
-                } finally {
-                    hardwareBuffer.close()
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "HardwareBuffer image copy failed, falling back: ${e.message}")
-        }
-
-        return imageToBitmapViaHeapCopy(image)
-    }
-
-    private fun imageToBitmapViaHeapCopy(image: Image): Bitmap? {
-        return try {
-            val plane = image.planes.firstOrNull() ?: return null
-            val rowStride = plane.rowStride
-            val pixelStride = plane.pixelStride
-            if (rowStride <= 0 || pixelStride <= 0) {
-                Log.w(TAG, "Invalid image plane stride: rowStride=$rowStride pixelStride=$pixelStride")
-                return null
-            }
-            if (pixelStride != 4 || rowStride % pixelStride != 0) {
-                Log.w(TAG, "Unsupported image plane layout: rowStride=$rowStride pixelStride=$pixelStride")
-                return null
-            }
-
-            val strideWidth = rowStride / pixelStride
-            if (strideWidth < image.width) {
-                Log.w(TAG, "Image stride narrower than width: strideWidth=$strideWidth width=${image.width}")
-                return null
-            }
-
-            val byteCount = rowStride * image.height
-            val src = plane.buffer.duplicate()
-            src.rewind()
-            if (src.remaining() < byteCount) {
-                Log.w(TAG, "Image buffer too small: remaining=${src.remaining()} expected=$byteCount")
-                return null
-            }
-
-            val bitmap = Bitmap.createBitmap(
-                strideWidth,
-                image.height,
-                Bitmap.Config.ARGB_8888
-            )
-            val bytes = ByteArray(byteCount)
-            src.get(bytes)
-            bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(bytes))
-
-            // Crop if there's row padding
-            if (strideWidth > image.width) {
-                val cropped = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
-                bitmap.recycle()
-                cropped
-            } else {
-                bitmap
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to convert Image to Bitmap via heap copy", e)
-            null
-        }
-    }
-
-    /**
      * Destroy the virtual display and release resources.
      */
     fun destroy() {
-        if (remoteVdDisplayId > 0) {
+        if (displayId > 0) {
             backend.releaseVirtualDisplay()
-            remoteVdDisplayId = -1
+            displayId = -1
         }
-        virtualDisplay?.release()
-        virtualDisplay = null
-        imageReader?.setOnImageAvailableListener(null, null)
-        imageReader?.close()
-        imageReader = null
-        readerHandlerThread?.quitSafely()
-        readerHandlerThread = null
-        readerHandler = null
-        synchronized(cacheLock) {
-            cachedBitmap?.recycle()
-            cachedBitmap = null
-        }
+        width = DEFAULT_WIDTH
+        height = DEFAULT_HEIGHT
         Log.i(TAG, "Virtual display destroyed")
     }
 }

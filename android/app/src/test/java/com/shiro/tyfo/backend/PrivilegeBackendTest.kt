@@ -19,13 +19,12 @@ class PrivilegeBackendTest {
     }
 
     @Test
-    fun `system backend has SYSTEM capabilities`() {
-        val backend = SystemBackend()
-        assertEquals("system", backend.capabilities.name)
-        assertTrue(backend.capabilities.canCaptureSecure)
-        assertTrue(backend.capabilities.canInjectInput)
-        assertTrue(backend.capabilities.canCaptureScreen)
-        assertTrue(backend.capabilities.canCreateVirtualDisplay)
+    fun `NoBackend can do nothing`() {
+        assertEquals("none", NoBackend.capabilities.name)
+        assertFalse(NoBackend.capabilities.canInjectInput)
+        assertNull(NoBackend.captureScreen(0))
+        assertEquals(-1, NoBackend.createVirtualDisplay("vd", 100, 100, 160, 0))
+        assertFalse(NoBackend.startActivityOnDisplay("intent:#Intent;end", 2))
     }
 
     @Test

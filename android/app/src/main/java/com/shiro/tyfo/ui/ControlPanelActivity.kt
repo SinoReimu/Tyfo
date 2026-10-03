@@ -243,7 +243,7 @@ class ControlPanelActivity : AppCompatActivity() {
             bound = true
             Log.i(TAG, "Bound to AgentService")
             observeService(service)
-            // Auto-launch setup if no backend available (standard flavor first launch)
+            // Auto-launch setup if no backend available (first launch)
             checkBackendAndPromptSetup(service)
         }
 

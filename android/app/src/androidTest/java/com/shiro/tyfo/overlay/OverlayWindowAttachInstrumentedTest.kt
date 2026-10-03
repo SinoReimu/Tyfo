@@ -34,10 +34,9 @@ import java.util.concurrent.TimeUnit
  *      foreground/background flips without throwing or leaking views.
  *      (Gemini's review note about Activity-transition flicker.)
  *
- * NOTE: requires `SYSTEM_ALERT_WINDOW` permission. The system app build
- * holds that permission via `privapp-permissions-tyfo.xml`, so this
- * test class assumes the app under test is the Tyfo privileged build
- * (the same precondition as `TakeoverOverlayUiTest`).
+ * NOTE: requires `SYSTEM_ALERT_WINDOW` permission. Grant it before running
+ * (`adb shell appops set com.shiro.tyfo SYSTEM_ALERT_WINDOW allow`), the same
+ * precondition as `TakeoverOverlayUiTest`.
  */
 @RunWith(AndroidJUnit4::class)
 class OverlayWindowAttachInstrumentedTest {

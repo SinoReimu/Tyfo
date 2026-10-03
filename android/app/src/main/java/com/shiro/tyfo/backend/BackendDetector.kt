@@ -1,7 +1,6 @@
 package com.shiro.tyfo.backend
 
 import android.content.Context
-import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -15,14 +14,7 @@ sealed class DetectionResult {
 object BackendDetector {
     private const val TAG = "BackendDetector"
 
-    fun isSystemUid(uid: Int = Process.myUid()): Boolean = uid == 1000
-
     suspend fun detect(context: Context): DetectionResult {
-        if (isSystemUid()) {
-            Log.i(TAG, "Running as system app (uid=${Process.myUid()})")
-            return DetectionResult.Ready(SystemBackend())
-        }
-
         val connectors = buildConnectorList(context)
         for (connector in connectors) {
             if (!connector.isAvailable()) continue

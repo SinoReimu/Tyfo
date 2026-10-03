@@ -35,7 +35,6 @@
     <string name="handoff_sensitive_input">Sensitive input required on device: %1$s</string>
     <string name="handoff_waiting_hint">Waiting for you to complete sensitive input…</string>
     <string name="handoff_reason_default">Please complete sensitive input on the device</string>
-    <string name="handoff_page_changed">Page has changed, agent taking over</string>
 
     <!-- Settings -->
     <string name="action_settings">Settings</string>

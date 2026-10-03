@@ -806,7 +806,7 @@ class ViewActivity : AppCompatActivity() {
             val vdm = agentService?.getVirtualDisplayManager() ?: return super.dispatchKeyEvent(event)
             val displayId = vdm.displayId
             if (displayId != -1) {
-                val result = InputInjector.injectKeyToDisplay(this, event, displayId, agentService?.privilegeBackend)
+                val result = InputInjector.injectKeyToDisplay(event, displayId, agentService?.privilegeBackend)
                 if (result) return true
             }
         }
@@ -941,7 +941,7 @@ class ViewActivity : AppCompatActivity() {
                 setScale(vdm.width.toFloat() / surfaceView.width, vdm.height.toFloat() / surfaceView.height)
             })
         }
-        val result = InputInjector.injectToDisplay(this, injected, displayId, agentService?.privilegeBackend)
+        val result = InputInjector.injectToDisplay(injected, displayId, agentService?.privilegeBackend)
         Log.d(TAG, "Injected touch to display $displayId: result=$result action=${event.action} x=${event.x} y=${event.y}")
         injected.recycle()
     }
@@ -960,13 +960,11 @@ class ViewActivity : AppCompatActivity() {
                 if (before > count) {
                     repeat(before - count) {
                         InputInjector.injectKeyToDisplay(
-                            this@ViewActivity,
                             KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL),
                             displayId,
                             agentService?.privilegeBackend
                         )
                         InputInjector.injectKeyToDisplay(
-                            this@ViewActivity,
                             KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL),
                             displayId,
                             agentService?.privilegeBackend
@@ -976,12 +974,8 @@ class ViewActivity : AppCompatActivity() {
                 if (inserted.isNotEmpty()) {
                     Log.i(TAG, "Takeover keyboard proxy forwarding text: ${inserted.length} chars")
                     lifecycleScope.launch {
-                        val backend = agentService?.privilegeBackend
-                        if (backend != null) {
-                            InputInjector(this@ViewActivity, displayId, backend = backend).typeText(inserted)
-                        } else {
-                            InputInjector(this@ViewActivity, displayId).typeText(inserted)
-                        }
+                        val backend = agentService?.privilegeBackend ?: return@launch
+                        InputInjector(this@ViewActivity, displayId, backend = backend).typeText(inserted)
                     }
                 }
             }

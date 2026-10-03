@@ -48,20 +48,12 @@ Mirror VD 使用 `DisplayManager.createVirtualDisplay(name, w, h, displayIdToMir
 方法创建，Shell uid 拥有 `CAPTURE_VIDEO_OUTPUT` 权限。Mirror 确保 agent 在用户 VIEW 模式下
 （主 VD surface 切到 SurfaceView 时）仍能获取新截图，而非旧缓存。
 
-System flavor 不需要 Mirror VD：VD 在进程内创建，`captureViaImageReader()` 可临时切换 surface。
-
 ---
 
-## 构建产物（Product Flavors）
+## 构建产物
 
-`app/build.gradle.kts` 定义 `privilege` 维度的两个 flavor：
-
-| Flavor | applicationId | 签名 | 特权来源 |
-|--------|---------------|------|----------|
-| `system` | `ai.opencyvis` | 平台签名（sharedUserId） | SystemBackend（进程内，uid 1000） |
-| `standard` | `ai.opencyvis.standard` | 普通签名 | RemoteBackend（shell uid 2000 via Shizuku 或 ADB） |
-
-`standard` flavor 无 `sharedUserId`，可安装在非平台签名设备（普通用户设备、开发机）。
+只有一个构建变体（没有 product flavor），applicationId 为 `com.shiro.tyfo`，普通签名，可安装在任何 Android 11+ 设备上。
+特权全部来自 RemoteBackend（root，或经 Shizuku / 无线 ADB 的 shell uid 2000）。
 
 ---
 
@@ -71,9 +63,11 @@ System flavor 不需要 Mirror VD：VD 在进程内创建，`captureViaImageRead
 
 将所有需要特殊权限的操作（输入注入、截图、虚拟显示器创建、任务管理）抽象到 `PrivilegeBackend` 接口后面，使 AIPhone 支持多种特权来源，无需修改业务逻辑：
 
-- **system flavor**：以 uid 1000 运行的平台签名系统应用，直接调用隐藏 API（SystemBackend）
-- **standard flavor via Shizuku**：Shizuku 将 `PrivilegedService` 启动在 shell uid (2000)，通过 AIDL IPC 代理
-- **standard flavor via Wireless ADB**：DirectConnector 通过 ADB 无线调试自配对，同样启动 `PrivilegedService` at shell uid
+- **Root**：RootConnector 通过 `su` 以 uid 0 启动 `PrivilegedService`
+- **Shizuku**：Shizuku 将 `PrivilegedService` 启动在 shell uid (2000)，通过 AIDL IPC 代理
+- **Wireless ADB**：DirectConnector 通过 ADB 无线调试自配对，同样启动 `PrivilegedService` at shell uid
+
+还没连上任何后端时，用 `NoBackend` 占位（所有调用都返回失败）。
 
 ### 两层抽象
 
@@ -82,16 +76,14 @@ System flavor 不需要 Mirror VD：VD 在进程内创建，`captureViaImageRead
                ↓
        PrivilegeBackend 接口
                │
-       ┌───────┴────────┐
-  SystemBackend      RemoteBackend
-  (进程内反射,        (AIDL IPC 代理,
-   uid=1000)          uid 无关)
-                            │
-                    ServiceConnector 接口
-                            │
-               ┌────────────┼──────────────┐
-        ShizukuConnector  DirectConnector  (未来: RootConnector)
-        (Shizuku SDK)     (ADB 无线自配对)
+         RemoteBackend
+        (AIDL IPC 代理)
+               │
+      ServiceConnector 接口
+               │
+   ┌───────────┼────────────────┐
+RootConnector  ShizukuConnector  DirectConnector
+(su, uid 0)    (Shizuku SDK)     (ADB 无线自配对)
 ```
 
 ### PrivilegedService 进程
@@ -164,11 +156,11 @@ connect() 调用
 ### BackendDetector 检测优先级
 
 ```
-isSystemUid() == true  →  SystemBackend（直接返回，无需连接器）
+RootConnector.isAvailable()  →  su 启动 PrivilegedService → Connected → RemoteBackend
                   │
 ShizukuConnector.isAvailable()  →  bindUserService → Connected → RemoteBackend
                   │
-DirectConnector.isAvailable()（Android 11+）  →  connect → ...
+DirectConnector（用户选了无线 ADB 才尝试）  →  connect → ...
                   │
 NoneAvailable → 引导到 SetupActivity
 ```

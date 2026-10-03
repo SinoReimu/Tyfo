@@ -76,9 +76,7 @@ OpenCyvis is the open-source alternative: you see every line of code, you pick t
 
 ---
 
-## Two Install Modes
-
-### Standard Mode
+## Install
 
 For most users. No custom ROM, no root, no computer.
 
@@ -92,16 +90,6 @@ The built-in ADB wireless pairing flow completes entirely on-device. Alternative
 > - The wizard sends you to **Wireless debugging → Pair device with pairing code**. Once you see the 6-digit code, **pull down the notification shade** and type the code straight into the OpenCyvis notification — no need to switch back to the app.
 > - Some vendor ROMs (ColorOS / OnePlus, MIUI, …) freeze apps once they go to the background. If the system asks you to **allow background activity / ignore battery optimization** during pairing, choose **Allow** for a smoother experience.
 > - If you don't see the notification with the input field, just pull down the shade once to find it.
-
-### System App Mode
-
-For developers and power users.
-
-Flash an AOSP system image. The app runs as a system application with full platform signing privileges. Screenshots use `SurfaceControl` directly — fastest possible. Full virtual display task management via system APIs.
-
-### How they relate
-
-Same AI engine, same LLM backends, same UI, same capabilities. The only difference is how the app obtains system permissions. Standard mode uses ADB shell or Shizuku privileges; System App mode uses platform signing. For everyday tasks, you won't notice the difference.
 
 ---
 
@@ -182,20 +170,16 @@ OpenCyvis is model-agnostic. Bring your own AI account, connect a private servic
 
 ## Architecture
 
-Both install modes share all upper-layer code. The difference is only in the privilege layer, isolated behind a `PrivilegeBackend` interface:
+The app itself is an ordinary app. Everything that needs system permissions goes through a `PrivilegedService` started as root, or as the shell user via Shizuku / wireless ADB, behind the `PrivilegeBackend` interface (`RemoteBackend`):
 
-| | SystemBackend | RemoteBackend |
-|---|---|---|
-| Privilege source | Platform signing (uid system) | ADB shell or Shizuku |
-| Input injection | InputManager reflection | AIDL proxy to PrivilegedService |
-| Screenshot | SurfaceControl.screenshot() | ImageReader from VD Surface |
-| VD task management | ActivityTaskManager reflection | PrivilegedService proxy |
+| | RemoteBackend |
+|---|---|
+| Privilege source | Root, Shizuku, or wireless ADB (shell) |
+| Input injection | AIDL proxy to PrivilegedService |
+| Screenshot | Captured in PrivilegedService |
+| VD task management | PrivilegedService proxy |
 
-The backend is selected automatically at runtime.
-
-<p align="center">
-  <img src="docs/demos/backend_architecture.png" width="500" alt="Dual backend architecture">
-</p>
+The connector is selected automatically at runtime (root first, then Shizuku, then wireless ADB if chosen).
 
 ---
 
@@ -214,14 +198,13 @@ An AI agent with full phone access is one of the most privileged pieces of softw
 
 ### Download
 
-Two APKs are available on the [Releases](https://github.com/opencyvis/opencyvis-phone/releases) page:
+The APK is available on the [Releases](https://github.com/opencyvis/opencyvis-phone/releases) page:
 
 | APK | For | Package ID |
 |:---|:---|:---|
 | `opencyvis-standard-release.apk` | Most users — install on any Android 11+ phone | `ai.opencyvis.standard` |
-| `opencyvis-system-release.apk` | Developers — flash into AOSP as a system app | `ai.opencyvis` |
 
-### Standard Mode (recommended)
+### Install the APK
 
 1. Download `opencyvis-standard-release.apk` and install
 2. Open the app and choose ADB wireless pairing or Shizuku
@@ -230,17 +213,13 @@ Two APKs are available on the [Releases](https://github.com/opencyvis/opencyvis-
 
 Use the built-in ADB wireless pairing flow by entering the 6-digit code in the OpenCyvis notification and allowing background activity if your ROM prompts for it. Alternatively, if Shizuku is already running, simply grant OpenCyvis access—no wireless pairing is required.
 
-### System App Mode
-
-For developers building a custom AOSP image:
+### Build from Source
 
 ```bash
 git clone https://github.com/opencyvis/opencyvis-phone.git
 cd opencyvis-phone/android
-./gradlew assembleSystemRelease
+./gradlew assembleDebug
 ```
-
-See [android/README-AOSP.md](android/README-AOSP.md) for AOSP deployment and platform key signing.
 
 ### Configure LLM
 
