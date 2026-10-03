@@ -120,6 +120,13 @@ object ResponseParser {
                 }
                 is ToolParam.Bool -> Regex("\"$key\"\\s*:\\s*\"?(true|false)")
                     .find(text)?.let { map[param.name] = it.groupValues[1] == "true" }
+                // 字符串数组：抠出 [...] 里的所有带引号的字符串
+                is ToolParam.TextList -> Regex("\"$key\"\\s*:\\s*\\[(.*?)\\]", RegexOption.DOT_MATCHES_ALL)
+                    .find(text)?.groupValues?.get(1)?.let { body ->
+                        val items = Regex("\"((?:[^\"\\\\]|\\\\.)*)\"").findAll(body)
+                            .map { unescape(it.groupValues[1]) }.toList()
+                        if (items.isNotEmpty()) map[param.name] = items
+                    }
                 // 点：键后面的头两个数，括号、引号、逗号写没写对都不管（豆包常写成 [270 54]，偶尔漏掉 ]）
                 is ToolParam.Point -> Regex("\"$key\"\\s*:\\s*[\\[\"(]?\\s*(?:<point>)?\\s*(-?\\d+(?:\\.\\d+)?)\\s*[, ]\\s*(-?\\d+(?:\\.\\d+)?)")
                     .find(text)?.let { map[param.name] = listOf(it.groupValues[1].toDouble(), it.groupValues[2].toDouble()) }

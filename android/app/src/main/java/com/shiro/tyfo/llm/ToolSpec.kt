@@ -43,6 +43,14 @@ sealed class ToolParam(
         default: Boolean? = null,
     ) : ToolParam(name, description, required, default)
 
+    /** 一组短字符串（JSON 数组），如 ask_user 的候选答案；最多 [maxItems] 个，多的截掉。 */
+    class TextList(
+        name: String,
+        description: String,
+        required: Boolean = false,
+        val maxItems: Int? = null,
+    ) : ToolParam(name, description, required, null)
+
     /**
      * 屏幕上的一个点 `[x, y]`，坐标范围 0..[maxX] / 0..[maxY]，超出的夹回范围内。
      * 用数组而不是两个参数：豆包常把一对坐标塞进 x 一个字段（`"x": "208 661"`），数组形式它写得很规整。
@@ -67,6 +75,11 @@ sealed class ToolParam(
                 enum?.let { put("enum", JSONArray(it)) }
             }
             is Bool -> put("type", "boolean")
+            is TextList -> {
+                put("type", "array")
+                put("items", JSONObject().put("type", "string"))
+                maxItems?.let { put("maxItems", it) }
+            }
             is Point -> {
                 put("type", "array")
                 put("items", JSONObject().put("type", "integer").put("minimum", 0).put("maximum", maxOf(maxX, maxY)))

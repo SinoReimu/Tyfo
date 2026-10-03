@@ -419,7 +419,7 @@ class AgentEngine(
                             // 先备好接收回答的位置再公布“等回答”，否则界面一出现就回答会落空
                             val deferred = CompletableDeferred<String?>()
                             userResponseDeferred = deferred
-                            _state.value = AgentState.WaitingForUser(outcome.question, step)
+                            _state.value = AgentState.WaitingForUser(outcome.question, step, outcome.options)
                             _stepResults.emit(
                                 StepResult(step, "ask_user", narration, true, "Asking: ${outcome.question}", elapsed(), false, debugInfo)
                             )

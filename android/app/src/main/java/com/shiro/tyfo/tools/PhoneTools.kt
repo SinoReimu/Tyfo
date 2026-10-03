@@ -175,10 +175,18 @@ class PhoneTools(
 
     private val askUser = tool(
         "ask_user", ToolKind.CONTROL,
-        "Ask the user a question and wait for the answer.",
+        "Ask the user a question and wait for the answer. When the answer is one of a few clear choices " +
+            "(yes/no, a time, pick one of several), pass them as options: the user taps one, or still types " +
+            "their own answer. Omit options for open-ended questions.",
         ToolParam.Text("question", "The question, in the user's language."),
+        ToolParam.TextList(
+            "options",
+            "A few short answer choices in the user's language, e.g. [\"明天下午4点\", \"今天晚些\"]. " +
+                "Leave out for open-ended questions.",
+            required = false, maxItems = 5,
+        ),
     ) { args, _ ->
-        ToolOutcome.AskUser(args.string("question"))
+        ToolOutcome.AskUser(args.string("question"), args.stringList("options"))
     }
 
     private val handoffUser = tool(

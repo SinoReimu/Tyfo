@@ -217,6 +217,10 @@ class PhoneToolsTest {
     @Test
     fun `ask_user, handoff_user and finish return their outcomes`() = runTest {
         assertEquals(ToolOutcome.AskUser("哪个城市？"), call("ask_user", """{"question":"哪个城市？"}"""))
+        assertEquals(
+            ToolOutcome.AskUser("几点吃饭？", listOf("明天下午4点", "今天晚些")),
+            call("ask_user", """{"question":"几点吃饭？","options":["明天下午4点","今天晚些"]}"""),
+        )
         assertEquals(ToolOutcome.Handoff("请输入支付密码"), call("handoff_user", """{"reason":"请输入支付密码"}"""))
         assertEquals(ToolOutcome.Finish("今天晴", true), call("finish", """{"answer":"今天晴"}"""))
         assertEquals(ToolOutcome.Finish("找不到该应用", false), call("finish", """{"answer":"找不到该应用","success":false}"""))

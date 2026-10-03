@@ -9,7 +9,7 @@ sealed class AgentState {
     data class Running(val step: Int, val thought: String, val partial: Boolean = false) : AgentState()
     object Paused : AgentState()
     data class Error(val message: String) : AgentState()
-    data class WaitingForUser(val question: String, val step: Int) : AgentState()
+    data class WaitingForUser(val question: String, val step: Int, val options: List<String> = emptyList()) : AgentState()
     data class WaitingForHandoff(val reason: String, val step: Int) : AgentState()
 }
 

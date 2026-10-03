@@ -160,6 +160,30 @@
                 </LinearLayout>
             </com.shiro.tyfo.ui.fx.PanelFrameLayout>
 
+            <!-- ask_user 的候选答案：点一个即作答，也可以照常在下面自己输入 -->
+            <HorizontalScrollView
+                android:id="@+id/option_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="6dp"
+                android:clipToPadding="false"
+                android:fadingEdgeLength="16dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:requiresFadingEdge="horizontal"
+                android:scrollbars="none"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:id="@+id/option_row"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
             <com.shiro.tyfo.ui.fx.PanelFrameLayout
                 android:id="@+id/input_pill"
                 android:layout_width="match_parent"

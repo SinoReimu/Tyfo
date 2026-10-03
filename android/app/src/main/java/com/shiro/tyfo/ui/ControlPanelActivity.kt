@@ -14,6 +14,7 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.util.TypedValue
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -25,6 +26,7 @@ import android.view.inputmethod.InputMethodManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -109,6 +111,8 @@ class ControlPanelActivity : AppCompatActivity() {
     private var messagesLoaded = false
     private var pending: Pending? = null
     private var forceScrollToEnd = false
+    // 当前渲染出来的 ask_user 候选答案，只有变化时才重建按钮（render 会被频繁调用）
+    private var renderedOptions: List<String> = emptyList()
     // 最近一个引擎和它的状态：用来判断首页的会话是不是正在执行的那段
     private var engine: AgentEngine? = null
     private var engineState: AgentState? = null
@@ -131,6 +135,8 @@ class ControlPanelActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var btnViewOp: TextView
     private lateinit var btnStop: TextView
+    private lateinit var optionScroll: HorizontalScrollView
+    private lateinit var optionRow: LinearLayout
     private lateinit var inputPill: PanelFrameLayout
     private lateinit var editInput: EditText
     private lateinit var btnSend: ImageView
@@ -401,6 +407,8 @@ class ControlPanelActivity : AppCompatActivity() {
         statusText = findViewById(R.id.text_status)
         btnViewOp = findViewById(R.id.btn_view_operation)
         btnStop = findViewById(R.id.btn_stop)
+        optionScroll = findViewById(R.id.option_scroll)
+        optionRow = findViewById(R.id.option_row)
         inputPill = findViewById(R.id.input_pill)
         editInput = findViewById(R.id.edit_input)
         btnSend = findViewById(R.id.btn_send)
@@ -679,6 +687,7 @@ class ControlPanelActivity : AppCompatActivity() {
         }
 
         renderTaskCard(phase)
+        renderOptions(phase)
         renderHint(phase)
 
         // 任务刚结束时循环可能还没退出：过一会儿再看一眼，别停在“执行中”
@@ -735,6 +744,56 @@ class ControlPanelActivity : AppCompatActivity() {
             }
         }
         if (taskCard.visibility != View.VISIBLE) fade(taskCard, show = true)
+    }
+
+    /** ask_user 给了候选答案时，在输入框上方显示一排可点的选项；点一个即作答，自由输入照常可用。 */
+    private fun renderOptions(phase: Phase?) {
+        val options = (engineState as? AgentState.WaitingForUser)
+            ?.takeIf { phase == Phase.ASKING }
+            ?.options.orEmpty()
+        if (options == renderedOptions) {
+            optionScroll.visibility = if (options.isEmpty()) View.GONE else View.VISIBLE
+            return
+        }
+        renderedOptions = options
+        optionRow.removeAllViews()
+        if (options.isEmpty()) {
+            optionScroll.visibility = View.GONE
+            return
+        }
+        for (option in options) {
+            optionRow.addView(optionChip(option))
+        }
+        optionScroll.scrollX = 0
+        optionScroll.visibility = View.VISIBLE
+    }
+
+    private fun optionChip(option: String): TextView = TextView(this).apply {
+        text = option
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        setTextColor(palette.onTonalButton)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        setPadding(dp(16), dp(10), dp(16), dp(10))
+        background = RippleDrawable(
+            ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(palette.tonalButton) },
+            null,
+        )
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { marginEnd = dp(8) }
+        setOnClickListener { answerWithOption(option) }
+    }
+
+    /** 点选项即作答：等价于在输入框里输入这个选项并发送。 */
+    private fun answerWithOption(option: String) {
+        val service = agentService ?: return
+        if (activePhase() != Phase.ASKING) return
+        if (voiceInputController.isListening) voiceInputController.stop()
+        service.submitUserResponse(option)
+        editInput.text.clear()
+        forceScrollToEnd = true
     }
 
     private fun renderHint(phase: Phase?) {

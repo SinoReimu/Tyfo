@@ -23,7 +23,7 @@ enum class ToolKind {
 sealed interface ToolOutcome {
     data class Result(val text: String, val isError: Boolean = false) : ToolOutcome
     data class Finish(val answer: String, val success: Boolean) : ToolOutcome
-    data class AskUser(val question: String) : ToolOutcome
+    data class AskUser(val question: String, val options: List<String> = emptyList()) : ToolOutcome
     data class Handoff(val reason: String) : ToolOutcome
 }
 
@@ -73,6 +73,9 @@ class ToolArgs(private val values: Map<String, Any?>) {
     fun bool(name: String): Boolean = values[name] as? Boolean ?: false
 
     @Suppress("UNCHECKED_CAST")
+    fun stringList(name: String): List<String> = values[name] as? List<String> ?: emptyList()
+
+    @Suppress("UNCHECKED_CAST")
     fun point(name: String): Pair<Int, Int> = values[name] as Pair<Int, Int>
 
     @Suppress("UNCHECKED_CAST")
@@ -84,6 +87,7 @@ class ToolArgs(private val values: Map<String, Any?>) {
             when (v) {
                 null -> Unit
                 is Pair<*, *> -> put(k, JSONArray().put(v.first).put(v.second))
+                is List<*> -> put(k, JSONArray(v))
                 else -> put(k, v)
             }
         }
@@ -155,6 +159,10 @@ class ToolRegistry(tools: List<PhoneTool>) {
                 }
                 is ToolParam.Bool -> toBool(given)
                     ?: return Validation.Error("parameter '${param.name}' must be true or false, got $given.")
+                is ToolParam.TextList -> {
+                    val list = toStringList(given)
+                    param.maxItems?.let { list.take(it) } ?: list
+                }
                 is ToolParam.Point -> {
                     val (x, y) = toPoint(given)
                         ?: return Validation.Error("parameter '${param.name}' must be a point [x, y], got $given.")
@@ -171,6 +179,13 @@ class ToolRegistry(tools: List<PhoneTool>) {
         is List<*> -> value.firstOrNull()?.let { toInt(it) }
         else -> null
     }
+
+    /** 一组字符串的各种写法：JSON 数组、单个字符串（当成只有一项）。去空去重保序。 */
+    private fun toStringList(value: Any): List<String> = when (value) {
+        is List<*> -> value.mapNotNull { it?.toString()?.trim()?.takeIf(String::isNotEmpty) }
+        is String -> value.trim().takeIf { it.isNotEmpty() }?.let { listOf(it) }.orEmpty()
+        else -> emptyList()
+    }.distinct()
 
     private fun toBool(value: Any): Boolean? = when (value) {
         is Boolean -> value
