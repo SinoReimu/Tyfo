@@ -12,7 +12,6 @@ from tests.e2e.assertions_ui import (
     ChatContains,
     DumpsysAbsent,
     DumpsysContains,
-    ImOutboundContains,
     UiElement,
     UiText,
     VdExists,
@@ -70,8 +69,6 @@ def _build_assertions(verify_list: list[dict]) -> list[Assertion]:
             assertions.append(DumpsysContains(item["dumpsys_contains"]))
         elif "dumpsys_absent" in item:
             assertions.append(DumpsysAbsent(item["dumpsys_absent"]))
-        elif "im_outbound_contains" in item:
-            assertions.append(ImOutboundContains(item["im_outbound_contains"]))
         elif "vd_exists" in item:
             assertions.append(VdExists(expected=bool(item["vd_exists"])))
         elif "chat_contains" in item:

@@ -32,7 +32,6 @@
 
     <!-- Preference screen -->
     <string name="pref_category_ai_model">AI 模型</string>
-    <string name="pref_category_remote_control">远程控制</string>
     <string name="pref_category_security">安全</string>
     <string name="pref_category_developer">开发者</string>
     <string name="pref_category_about">关于</string>
@@ -46,30 +45,10 @@
     <string name="pref_base_url_title">Base URL</string>
     <string name="pref_max_steps_title">最大步数</string>
     <string name="pref_max_steps_summary">Agent 最大执行步数</string>
-    <string name="pref_im_enabled_title">启用远程 IM</string>
-    <string name="pref_im_enabled_summary">通过即时通讯应用控制 Agent</string>
-    <string name="pref_im_step_screenshots_title">步骤截图</string>
-    <string name="pref_im_step_screenshots_summary">每步执行后发送截图</string>
-    <string name="pref_telegram_title">Telegram</string>
-    <string name="pref_telegram_summary">配置 Telegram 机器人</string>
-    <string name="pref_feishu_title">飞书</string>
-    <string name="pref_feishu_summary">配置飞书应用</string>
-    <string name="pref_pair_status_title">状态</string>
-    <string name="pref_generate_code_summary">生成配对码绑定账号</string>
-    <string name="pref_unpair_summary">解除当前配对</string>
-    <string name="pref_telegram_bot_token_title">Bot Token</string>
-    <string name="pref_feishu_app_id_title">App ID</string>
-    <string name="pref_feishu_app_secret_title">App Secret</string>
     <string name="pref_debug_mode_title">调试模式</string>
     <string name="pref_debug_mode_summary">显示 LLM 响应详情</string>
     <string name="pref_manage_memory_summary">查看和编辑 Agent 记忆</string>
-    <string name="pref_advanced_title">高级</string>
-    <string name="pref_advanced_summary">手动设置 ID（调试/恢复）</string>
-    <string name="pref_telegram_chat_id_title">Telegram Chat ID</string>
-    <string name="pref_feishu_open_id_title">飞书 Open ID</string>
     <string name="pref_version_title">版本</string>
-    <string name="pairing_code_dialog_title">配对码</string>
-    <string name="pairing_code_dialog_message">在你的 %2$s 中发送 /pair %1$s。\n\n此配对码 10 分钟后过期。</string>
 
     <!-- Provider Profiles -->
     <string name="pref_profile_title">配置</string>
@@ -126,45 +105,9 @@
     <string name="notif_channel_ask_desc">Agent 等待用户回答时的高优先级提醒</string>
     <string name="notif_max_steps_reached">已达到最大步数限制 (%1$d)</string>
 
-    <!-- IM pairing & replies -->
-    <string name="im_pair_success">配对成功！你现在可以发送指令了。</string>
-    <string name="im_pair_expired">配对码已过期，请重新生成。</string>
-    <string name="im_pair_wrong_code">配对码无效。</string>
-    <string name="im_pair_locked_out">尝试次数过多，请稍后再试。</string>
-    <string name="im_pair_hint">发送 /pair &lt;配对码&gt; 完成配对。配对码在 Tyfo 设置中查看。</string>
-    <string name="im_unpair_success">已解绑。发送 /pair &lt;配对码&gt; 重新配对。</string>
-    <string name="im_already_paired">已配对。</string>
-    <string name="im_stopped">已停止</string>
-    <string name="im_busy">Agent 忙，/stop 终止后再发</string>
-    <string name="im_group_rejected">暂不支持群聊消息。</string>
 
-    <!-- IM settings UI -->
-    <string name="im_pairing_code_label">配对码</string>
-    <string name="im_generate_code">生成配对码</string>
-    <string name="im_no_code">未生成</string>
-    <string name="im_paired_with">已配对：%1$s</string>
-    <string name="im_not_paired">未配对</string>
-    <string name="im_unpair">解除配对</string>
-    <string name="im_code_expires">%1$d:%2$02d 后过期</string>
 
-    <!-- IM status & notification texts -->
-    <string name="im_status_no_service">AgentService 未连接</string>
-    <string name="im_status_idle">空闲: %1$s</string>
-    <string name="im_status_running">运行中: step %1$d, %2$s</string>
-    <string name="im_status_waiting_user">等待用户: %1$s</string>
-    <string name="im_status_waiting_handoff">等待交棒: %1$s</string>
-    <string name="im_status_error">错误: %1$s</string>
-    <string name="im_status_paused">已暂停</string>
-    <string name="im_status_no_engine">无引擎</string>
-    <string name="im_notify_ask_user">需要你回答: %1$s</string>
-    <string name="im_notify_handoff">需要交棒: %1$s</string>
-    <string name="im_notify_task_complete">任务完成: %1$s</string>
-    <string name="im_notify_error">错误: %1$s</string>
 
-    <!-- IM /status extra lines -->
-    <string name="im_status_phone">手机: %1$s</string>
-    <string name="im_status_device">设备: %1$s %2$s, Android %3$s</string>
-    <string name="im_status_llm">LLM: %1$s / %2$s</string>
 
     <!-- Home Screen Greetings -->
     <string name="greeting_morning">早上好</string>

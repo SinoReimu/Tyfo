@@ -14,15 +14,6 @@ class ConfigRepository(context: Context) {
         private const val KEY_API_PROVIDER = "api_provider"
         private const val KEY_DEBUG_MODE = "debug_mode"
         private const val KEY_ACTIVE_PROFILE = "active_profile"
-        private const val KEY_IM_REMOTE_ENABLED = "im_remote_enabled"
-        private const val KEY_IM_SEND_STEP_SCREENSHOTS = "im_send_step_screenshots"
-        private const val KEY_TELEGRAM_BOT_TOKEN = "telegram_bot_token"
-        private const val KEY_TELEGRAM_ALLOWED_CHAT_ID = "telegram_allowed_chat_id"
-        private const val KEY_TELEGRAM_OFFSET = "telegram_offset"
-        private const val KEY_FEISHU_APP_ID = "feishu_app_id"
-        private const val KEY_FEISHU_APP_SECRET = "feishu_app_secret"
-        private const val KEY_FEISHU_ALLOWED_OPEN_ID = "feishu_allowed_open_id"
-        private const val KEY_FEISHU_TARGET_CHAT_ID = "feishu_target_chat_id"
         private const val KEY_BLACKLISTED_PACKAGES = "blacklisted_packages"
 
         /**
@@ -108,46 +99,6 @@ class ConfigRepository(context: Context) {
     var debugMode: Boolean
         get() = prefs.getBoolean(KEY_DEBUG_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_DEBUG_MODE, value).apply()
-
-    var imRemoteEnabled: Boolean
-        get() = prefs.getBoolean(KEY_IM_REMOTE_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_IM_REMOTE_ENABLED, value).apply()
-
-    var imSendStepScreenshots: Boolean
-        get() = prefs.getBoolean(KEY_IM_SEND_STEP_SCREENSHOTS, false)
-        set(value) = prefs.edit().putBoolean(KEY_IM_SEND_STEP_SCREENSHOTS, value).apply()
-
-    var telegramBotToken: String
-        get() = prefs.getString(KEY_TELEGRAM_BOT_TOKEN, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_TELEGRAM_BOT_TOKEN, value).apply()
-
-    var telegramAllowedChatId: String
-        get() = prefs.getString(KEY_TELEGRAM_ALLOWED_CHAT_ID, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_TELEGRAM_ALLOWED_CHAT_ID, value).apply()
-
-    var telegramOffset: Long
-        get() = prefs.getLong(KEY_TELEGRAM_OFFSET, 0L)
-        set(value) = prefs.edit().putLong(KEY_TELEGRAM_OFFSET, value).apply()
-
-    var feishuAppId: String
-        get() = prefs.getString(KEY_FEISHU_APP_ID, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_FEISHU_APP_ID, value).apply()
-
-    var feishuAppSecret: String
-        get() = prefs.getString(KEY_FEISHU_APP_SECRET, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_FEISHU_APP_SECRET, value).apply()
-
-    var feishuAllowedOpenId: String
-        get() = prefs.getString(KEY_FEISHU_ALLOWED_OPEN_ID, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_FEISHU_ALLOWED_OPEN_ID, value).apply()
-
-    var feishuTargetChatId: String
-        get() = prefs.getString(KEY_FEISHU_TARGET_CHAT_ID, "") ?: ""
-        set(value) = prefs.edit().putString(KEY_FEISHU_TARGET_CHAT_ID, value).apply()
-
-    var feishuLastProcessedMsgTime: Long
-        get() = prefs.getLong("feishu_last_processed_msg_time", 0L)
-        set(value) = prefs.edit().putLong("feishu_last_processed_msg_time", value).apply()
 
     var blacklistedPackages: Set<String>
         get() = prefs.getString(KEY_BLACKLISTED_PACKAGES, "")!!

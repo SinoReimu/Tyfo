@@ -43,7 +43,6 @@
 
     <!-- Preference screen -->
     <string name="pref_category_ai_model">AI Model</string>
-    <string name="pref_category_remote_control">Remote Control</string>
     <string name="pref_category_security">Security</string>
     <string name="pref_category_developer">Developer</string>
     <string name="pref_category_about">About</string>
@@ -57,13 +56,6 @@
     <string name="pref_base_url_title">Base URL</string>
     <string name="pref_max_steps_title">Max Steps</string>
     <string name="pref_max_steps_summary">Maximum agent steps</string>
-    <string name="pref_share_config_qr">Share Config QR</string>
-    <string name="pref_share_config_qr_summary">Generate QR code to share LLM settings</string>
-    <string name="pref_scan_config_qr">Scan Config QR</string>
-    <string name="pref_scan_config_qr_summary">Import LLM settings from QR code</string>
-    <string name="qr_share_title">Share LLM Config</string>
-    <string name="qr_scan_no_result">No QR code detected</string>
-    <string name="qr_scan_invalid">Invalid QR code — not an Tyfo config link</string>
 
     <!-- Provider Profiles -->
     <string name="pref_profile_title">Profile</string>
@@ -80,30 +72,10 @@
     <string name="profile_name_exists">Profile \"%1$s\" already exists</string>
     <string name="profile_delete_confirm">Delete profile \"%1$s\"?</string>
 
-    <string name="pref_im_enabled_title">Enable Remote IM</string>
-    <string name="pref_im_enabled_summary">Control the agent via messaging apps</string>
-    <string name="pref_im_step_screenshots_title">Step Screenshots</string>
-    <string name="pref_im_step_screenshots_summary">Send a screenshot after each step</string>
-    <string name="pref_telegram_title">Telegram</string>
-    <string name="pref_telegram_summary">Configure Telegram bot</string>
-    <string name="pref_feishu_title">Feishu</string>
-    <string name="pref_feishu_summary">Configure Feishu app</string>
-    <string name="pref_pair_status_title">Status</string>
-    <string name="pref_generate_code_summary">Generate a code to pair your account</string>
-    <string name="pref_unpair_summary">Remove the current pairing</string>
-    <string name="pref_telegram_bot_token_title">Bot Token</string>
-    <string name="pref_feishu_app_id_title">App ID</string>
-    <string name="pref_feishu_app_secret_title">App Secret</string>
     <string name="pref_debug_mode_title">Debug Mode</string>
     <string name="pref_debug_mode_summary">Show LLM response details</string>
     <string name="pref_manage_memory_summary">View and edit agent memories</string>
-    <string name="pref_advanced_title">Advanced</string>
-    <string name="pref_advanced_summary">Manual IDs for debug and recovery</string>
-    <string name="pref_telegram_chat_id_title">Telegram Chat ID</string>
-    <string name="pref_feishu_open_id_title">Feishu Open ID</string>
     <string name="pref_version_title">Version</string>
-    <string name="pairing_code_dialog_title">Pairing Code</string>
-    <string name="pairing_code_dialog_message">Send /pair %1$s in your %2$s chat.\n\nThis code expires in 10 minutes.</string>
 
     <!-- Memory screen -->
     <string name="memory_title">Memory</string>
@@ -145,59 +117,10 @@
     <string name="notif_channel_ask_desc">High-priority alerts when the agent is waiting for your answer</string>
     <string name="notif_max_steps_reached">Max steps reached (%1$d)</string>
 
-    <!-- IM Pairing -->
-    <string name="im_pair_success">Paired successfully!</string>
-    <string name="im_pair_expired">Pairing code expired. Please generate a new one.</string>
-    <string name="im_pair_wrong_code">Wrong pairing code.</string>
-    <string name="im_pair_locked_out">Too many failed attempts. Please try again later.</string>
-    <string name="im_pair_hint">Send /pair &lt;code&gt; to pair with this device.</string>
-    <string name="im_unpair_success">Unpaired successfully.</string>
-    <string name="im_already_paired">Already paired.</string>
-    <string name="im_stopped">Stopped</string>
-    <string name="im_busy">Agent is busy, send /stop to terminate first</string>
-    <string name="im_group_rejected">Commands not supported in group chats</string>
 
-    <!-- IM settings UI -->
-    <string name="im_pairing_code_label">Pairing Code</string>
-    <string name="im_generate_code">Generate Code</string>
-    <string name="im_no_code">Not generated</string>
-    <string name="im_paired_with">Paired: %1$s</string>
-    <string name="im_not_paired">Not paired</string>
-    <string name="im_unpair">Unpair</string>
-    <string name="im_code_expires">Expires in %1$d:%2$02d</string>
 
-    <!-- IM status & notification texts -->
-    <string name="im_status_no_service">AgentService not connected</string>
-    <string name="im_status_idle">Idle: %1$s</string>
-    <string name="im_status_running">Running: step %1$d, %2$s</string>
-    <string name="im_status_waiting_user">Waiting for input: %1$s</string>
-    <string name="im_status_waiting_handoff">Waiting for handoff: %1$s</string>
-    <string name="im_status_error">Error: %1$s</string>
-    <string name="im_status_paused">Paused</string>
-    <string name="im_status_no_engine">No engine</string>
-    <string name="im_notify_ask_user">Question: %1$s</string>
-    <string name="im_notify_handoff">Handoff needed: %1$s</string>
-    <string name="im_notify_task_complete">Task complete: %1$s</string>
-    <string name="im_notify_error">Error: %1$s</string>
 
-    <!-- IM /status extra lines -->
-    <string name="im_status_phone">Phone: %1$s</string>
-    <string name="im_status_device">Device: %1$s %2$s, Android %3$s</string>
-    <string name="im_status_llm">LLM: %1$s / %2$s</string>
 
-    <!-- Feishu QR Registration -->
-    <string name="feishu_qr_scan_title">Scan QR to Create Bot</string>
-    <string name="feishu_qr_scan_summary">One-step setup via Feishu app</string>
-    <string name="feishu_manual_config_title">Manual Configuration</string>
-    <string name="feishu_manual_config_summary">Enter App ID and App Secret manually</string>
-    <string name="feishu_qr_dialog_title">Scan to Create Feishu Bot</string>
-    <string name="feishu_qr_dialog_instruction">Open Feishu and scan this QR code</string>
-    <string name="feishu_qr_time_remaining">Time remaining: %1$d:%2$02d</string>
-    <string name="feishu_qr_success">Feishu bot created successfully!</string>
-    <string name="feishu_qr_timeout">QR code expired. Please try again.</string>
-    <string name="feishu_qr_error">Registration failed: %1$s</string>
-    <string name="feishu_qr_network_error">Network error. Please check your connection.</string>
-    <string name="feishu_pair_auto_hint">Bot ready — send a message to auto-pair</string>
 
     <!-- Home Screen Greetings -->
     <string name="greeting_morning">Good morning</string>

@@ -14,43 +14,12 @@ import androidx.preference.PreferenceScreen
 import com.shiro.tyfo.config.ConfigDeepLink
 import com.shiro.tyfo.config.ConfigRepository
 import com.shiro.tyfo.config.ProfileRepository
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 
 class SettingsActivity : AppCompatActivity(),
     PreferenceFragmentCompat.OnPreferenceStartScreenCallback {
 
     lateinit var config: ConfigRepository
         private set
-
-    private val qrScanLauncher = registerForActivityResult(ScanContract()) { result ->
-        val contents = result.contents
-        if (contents == null) {
-            Toast.makeText(this, getString(R.string.qr_scan_no_result), Toast.LENGTH_SHORT).show()
-            return@registerForActivityResult
-        }
-        val uri = Uri.parse(contents)
-        if (!isConfigUri(uri)) {
-            Toast.makeText(this, getString(R.string.qr_scan_invalid), Toast.LENGTH_LONG).show()
-            return@registerForActivityResult
-        }
-        val params = uri.queryParameterNames.associateWith { uri.getQueryParameter(it) }
-        val imported = ConfigDeepLink.parse(params).getOrElse { error ->
-            Toast.makeText(this, error.message ?: "Invalid config", Toast.LENGTH_LONG).show()
-            return@registerForActivityResult
-        }
-        showImportConfirmation(imported)
-    }
-
-    fun launchQrScanner() {
-        val options = ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setPrompt("Scan Tyfo config QR code")
-            setBeepEnabled(false)
-            setOrientationLocked(true)
-        }
-        qrScanLauncher.launch(options)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -160,12 +129,6 @@ class SettingsActivity : AppCompatActivity(),
         config.model = imported.model
         config.baseUrl = imported.baseUrl
         imported.maxSteps?.let { config.maxSteps = it }
-        imported.imRemoteEnabled?.let { config.imRemoteEnabled = it }
-        imported.telegramBotToken?.let { config.telegramBotToken = it }
-        imported.telegramAllowedChatId?.let { config.telegramAllowedChatId = it }
-        imported.feishuAppId?.let { config.feishuAppId = it }
-        imported.feishuAppSecret?.let { config.feishuAppSecret = it }
-        imported.feishuAllowedOpenId?.let { config.feishuAllowedOpenId = it }
 
         val profileRepo = ProfileRepository(config, this)
         val profileName = imported.profile

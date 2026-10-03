@@ -119,10 +119,10 @@ class AgentTestCase:
     pre_steps: ClassVar[list[str] | None] = None
     post_steps: ClassVar[list[str] | None] = None
 
-    # Extra deeplink params appended to mock setup deeplink (e.g. im_remote_enabled=true)
+    # Extra deeplink params appended to mock setup deeplink (e.g. max_steps=5)
     extra_deeplink_params: ClassVar[dict[str, str] | None] = None
 
-    # Skip the main dumpsys start instruction — for scenarios driven entirely by post_steps (e.g. IM cold start)
+    # Skip the main dumpsys start instruction — for scenarios driven entirely by post_steps
     skip_start_agent: ClassVar[bool] = False
 
     @classmethod

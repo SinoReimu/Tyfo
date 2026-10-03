@@ -40,23 +40,4 @@ class ConfigDeepLinkProfileTest {
         val result = ConfigDeepLink.parse(params).getOrThrow()
         assertNull(result.profile)
     }
-
-    @Test
-    fun `buildUri includes profile param`() {
-        val uri = ConfigDeepLink.buildUri("openai", "key", "model", "url", 100, "my-profile")
-        assertTrue(uri.contains("profile=my-profile"))
-    }
-
-    @Test
-    fun `buildUri omits profile when null`() {
-        val uri = ConfigDeepLink.buildUri("openai", "key", "model", "url", 100, null)
-        assertFalse(uri.contains("profile"))
-    }
-
-    @Test
-    fun `buildUri backward compatible without profile`() {
-        val uri = ConfigDeepLink.buildUri("openai", "key", "model", "url", 100)
-        assertFalse(uri.contains("profile"))
-        assertTrue(uri.startsWith("tyfo://config?"))
-    }
 }

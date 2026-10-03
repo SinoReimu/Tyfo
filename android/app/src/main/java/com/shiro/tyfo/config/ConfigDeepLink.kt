@@ -2,34 +2,12 @@ package com.shiro.tyfo.config
 
 object ConfigDeepLink {
 
-    fun buildUri(provider: String, apiKey: String, model: String, baseUrl: String, maxSteps: Int,
-                 profile: String? = null): String {
-        val params = mutableMapOf(
-            "provider" to provider,
-            "api_key" to apiKey,
-            "model" to model,
-            "base_url" to baseUrl,
-            "max_steps" to maxSteps.toString()
-        )
-        profile?.let { params["profile"] = it }
-        val query = params.entries.joinToString("&") { (k, v) ->
-            "${java.net.URLEncoder.encode(k, "UTF-8")}=${java.net.URLEncoder.encode(v, "UTF-8")}"
-        }
-        return "tyfo://config?$query"
-    }
-
     data class ImportedConfig(
         val provider: String,
         val apiKey: String,
         val model: String,
         val baseUrl: String,
         val maxSteps: Int?,
-        val imRemoteEnabled: Boolean?,
-        val telegramBotToken: String?,
-        val telegramAllowedChatId: String?,
-        val feishuAppId: String?,
-        val feishuAppSecret: String?,
-        val feishuAllowedOpenId: String?,
         val profile: String? = null
     )
 
@@ -51,12 +29,6 @@ object ConfigDeepLink {
                 ?: return Result.failure(IllegalArgumentException("max_steps must be a positive integer"))
         }
 
-        val imRemoteEnabled = params["im_remote_enabled"]?.trim()?.toBooleanStrictOrNull()
-        val telegramBotToken = params["telegram_bot_token"]?.trim()?.ifEmpty { null }
-        val telegramAllowedChatId = params["telegram_chat_id"]?.trim()?.ifEmpty { null }
-        val feishuAppId = params["feishu_app_id"]?.trim()?.ifEmpty { null }
-        val feishuAppSecret = params["feishu_app_secret"]?.trim()?.ifEmpty { null }
-        val feishuAllowedOpenId = params["feishu_open_id"]?.trim()?.ifEmpty { null }
         val profile = params["profile"]?.trim()?.ifEmpty { null }
 
         return Result.success(
@@ -66,12 +38,6 @@ object ConfigDeepLink {
                 model = params["model"]?.trim()?.ifEmpty { null } ?: ConfigRepository.DEFAULT_MODEL,
                 baseUrl = firstParam(params, "base_url", "url")?.trim()?.ifEmpty { null } ?: ConfigRepository.DEFAULT_BASE_URL,
                 maxSteps = maxSteps,
-                imRemoteEnabled = imRemoteEnabled,
-                telegramBotToken = telegramBotToken,
-                telegramAllowedChatId = telegramAllowedChatId,
-                feishuAppId = feishuAppId,
-                feishuAppSecret = feishuAppSecret,
-                feishuAllowedOpenId = feishuAllowedOpenId,
                 profile = profile
             )
         )

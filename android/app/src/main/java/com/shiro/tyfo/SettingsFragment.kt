@@ -1,49 +1,21 @@
 package com.shiro.tyfo
 
 import android.content.Intent
-import android.graphics.Bitmap
 import android.os.Bundle
-import android.os.CountDownTimer
-import android.view.LayoutInflater
-import android.view.View
-import android.widget.ImageView
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.preference.EditTextPreference
-import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
-import com.shiro.tyfo.config.ConfigDeepLink
 import com.shiro.tyfo.config.ConfigRepository
 import com.shiro.tyfo.config.ProfileRepository
 import com.shiro.tyfo.config.ProviderProfile
-import com.shiro.tyfo.remoteim.ImPairingManager
-import com.shiro.tyfo.remoteim.RemoteImControlService
-import com.shiro.tyfo.remoteim.feishu.FeishuRegistrationApi
 import com.shiro.tyfo.ui.MemoryActivity
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class SettingsFragment : PreferenceFragmentCompat() {
 
     private lateinit var config: ConfigRepository
     private lateinit var profileRepo: ProfileRepository
-    private lateinit var pairingManager: ImPairingManager
-    private val registrationApi = FeishuRegistrationApi()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var telegramCountdownJob: Job? = null
-    private var qrPollingJob: Job? = null
-    private var manualConfigVisible = false
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         preferenceManager.sharedPreferencesName = "tyfo_config"
@@ -56,36 +28,15 @@ class SettingsFragment : PreferenceFragmentCompat() {
         profileRepo = ProfileRepository(config, requireContext())
         profileRepo.ensureMigrated()
 
-        if (App.imPairingManager == null) {
-            App.imPairingManager = ImPairingManager(config)
-        }
-        pairingManager = App.imPairingManager!!
-
         setupProfilePreference()
         setupTextSummaries()
         setupMaxStepsPreference()
         setupAutoSaveOnChange()
         setupMemoryPreference()
         setupBlacklistPreference()
-        setupQrScanPreference()
-        setupConfigQrPreferences()
-        setupManualConfigToggle()
-        setupPairingPreferences()
-        setupUnpairPreferences()
         setupBackendPreferences()
         setupAssistantPreference()
         setupVersionInfo()
-        refreshPairStatus("telegram")
-        refreshPairStatus("feishu")
-
-        // Poll pairing status so UI updates when pairing happens via IM
-        scope.launch {
-            while (true) {
-                delay(2000)
-                refreshPairStatus("telegram")
-                refreshPairStatus("feishu")
-            }
-        }
     }
 
     /** Migrate Int-stored SharedPreferences values to String so EditTextPreference doesn't crash. */
@@ -270,8 +221,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         val simpleProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
 
         // Plain text fields — show value as summary
-        for (key in listOf("model", "base_url", "feishu_app_id",
-                           "telegram_allowed_chat_id", "feishu_allowed_open_id")) {
+        for (key in listOf("model", "base_url")) {
             findPreference<EditTextPreference>(key)?.summaryProvider = simpleProvider
         }
 
@@ -282,7 +232,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             else if (v.length <= 8) "••••"
             else "${v.take(4)}••••${v.takeLast(4)}"
         }
-        for (key in listOf("api_key", "telegram_bot_token", "feishu_app_secret")) {
+        for (key in listOf("api_key")) {
             findPreference<EditTextPreference>(key)?.summaryProvider = maskProvider
         }
     }
@@ -368,304 +318,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             .show()
     }
 
-    // --- QR Scan Registration ---
-
-    private fun setupQrScanPreference() {
-        findPreference<Preference>("feishu_qr_scan")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                startQrRegistration()
-                true
-            }
-    }
-
-    private fun setupConfigQrPreferences() {
-        findPreference<Preference>("share_config_qr")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                shareConfigQr()
-                true
-            }
-        findPreference<Preference>("scan_config_qr")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                (activity as? SettingsActivity)?.launchQrScanner()
-                true
-            }
-    }
-
-    private fun shareConfigQr() {
-        val uri = ConfigDeepLink.buildUri(
-            config.apiProvider, config.apiKey, config.model, config.baseUrl, config.maxSteps,
-            profile = config.activeProfileName.ifEmpty { null }
-        )
-        val bitmap = generateQrBitmap(uri, 512) ?: run {
-            Toast.makeText(requireContext(), "Failed to generate QR code", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val dialogView = LayoutInflater.from(requireContext())
-            .inflate(R.layout.dialog_qr_code, null)
-        val qrImage = dialogView.findViewById<ImageView>(R.id.qr_image)
-        val qrTimer = dialogView.findViewById<TextView>(R.id.qr_timer)
-        val qrInstruction = dialogView.findViewById<TextView>(R.id.qr_instruction)
-        qrImage.setImageBitmap(bitmap)
-        qrInstruction?.visibility = View.GONE
-        qrTimer?.text = "${config.apiProvider} / ${config.model}"
-
-        AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.qr_share_title))
-            .setView(dialogView)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
-    }
-
-    private fun startQrRegistration() {
-        scope.launch {
-            // Step 1: init
-            val initResult = registrationApi.init()
-            val nonce = when (initResult) {
-                is FeishuRegistrationApi.InitResult.Success -> initResult.nonce
-                is FeishuRegistrationApi.InitResult.Error -> {
-                    Toast.makeText(requireContext(),
-                        getString(R.string.feishu_qr_error, initResult.message),
-                        Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-            }
-
-            // Step 2: begin
-            val beginResult = registrationApi.begin(nonce)
-            when (beginResult) {
-                is FeishuRegistrationApi.BeginResult.Success -> {
-                    showQrCodeDialog(beginResult.userCode, beginResult.deviceCode, beginResult.expiresIn)
-                }
-                is FeishuRegistrationApi.BeginResult.Error -> {
-                    Toast.makeText(requireContext(),
-                        getString(R.string.feishu_qr_error, beginResult.message),
-                        Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    private fun showQrCodeDialog(userCode: String, deviceCode: String, expiresIn: Int) {
-        val qrUrl = "https://open.feishu.cn/page/launcher?user_code=$userCode"
-        val bitmap = generateQrBitmap(qrUrl, 512) ?: run {
-            Toast.makeText(requireContext(), R.string.feishu_qr_network_error, Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        val dialogView = LayoutInflater.from(requireContext())
-            .inflate(R.layout.dialog_qr_code, null)
-        val qrImage = dialogView.findViewById<ImageView>(R.id.qr_image)
-        val timerText = dialogView.findViewById<TextView>(R.id.qr_timer)
-        qrImage.setImageBitmap(bitmap)
-
-        val dialog = AlertDialog.Builder(requireContext())
-            .setTitle(R.string.feishu_qr_dialog_title)
-            .setView(dialogView)
-            .setNegativeButton(android.R.string.cancel) { d, _ ->
-                qrPollingJob?.cancel()
-                d.dismiss()
-            }
-            .setCancelable(false)
-            .show()
-
-        // Countdown timer
-        val totalMs = expiresIn * 1000L
-        object : CountDownTimer(totalMs, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val sec = (millisUntilFinished / 1000).toInt()
-                timerText.text = getString(R.string.feishu_qr_time_remaining, sec / 60, sec % 60)
-            }
-            override fun onFinish() {
-                timerText.text = getString(R.string.feishu_qr_timeout)
-                qrPollingJob?.cancel()
-            }
-        }.start()
-
-        // Step 3: poll
-        qrPollingJob?.cancel()
-        qrPollingJob = scope.launch {
-            var pollInterval = 5000L
-            while (true) {
-                delay(pollInterval)
-                val pollResult = withContext(Dispatchers.IO) { registrationApi.poll(deviceCode) }
-                when (pollResult) {
-                    is FeishuRegistrationApi.PollResult.Success -> {
-                        // Save credentials
-                        config.feishuAppId = pollResult.clientId
-                        config.feishuAppSecret = pollResult.clientSecret
-                        // Auto-pair
-                        if (pollResult.openId.isNotEmpty()) {
-                            config.feishuAllowedOpenId = pollResult.openId
-                        }
-                        // Enable remote IM if not already on
-                        if (!config.imRemoteEnabled) {
-                            config.imRemoteEnabled = true
-                        }
-                        // Update UI
-                        findPreference<EditTextPreference>("feishu_app_id")?.text = pollResult.clientId
-                        findPreference<EditTextPreference>("feishu_app_secret")?.text = pollResult.clientSecret
-                        refreshPairStatus("feishu")
-                        dialog.dismiss()
-                        Toast.makeText(requireContext(), R.string.feishu_qr_success, Toast.LENGTH_LONG).show()
-                        // Restart service to pick up new credentials
-                        RemoteImControlService.restart(requireContext())
-                        return@launch
-                    }
-                    is FeishuRegistrationApi.PollResult.Pending -> {
-                        // Still waiting, continue polling
-                    }
-                    is FeishuRegistrationApi.PollResult.SlowDown -> {
-                        pollInterval = (pollInterval * 2).coerceAtMost(15000L)
-                    }
-                    is FeishuRegistrationApi.PollResult.Error -> {
-                        dialog.dismiss()
-                        Toast.makeText(requireContext(),
-                            getString(R.string.feishu_qr_error, pollResult.message),
-                            Toast.LENGTH_LONG).show()
-                        return@launch
-                    }
-                }
-            }
-        }
-    }
-
-    private fun generateQrBitmap(content: String, size: Int): Bitmap? {
-        return try {
-            val hints = mapOf(EncodeHintType.MARGIN to 1)
-            val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-            for (x in 0 until size) {
-                for (y in 0 until size) {
-                    bitmap.setPixel(x, y, if (bitMatrix[x, y]) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
-                }
-            }
-            bitmap
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    // --- Manual Config Toggle ---
-
-    private fun setupManualConfigToggle() {
-        val togglePref = findPreference<Preference>("feishu_manual_config") ?: return
-        val appIdPref = findPreference<EditTextPreference>("feishu_app_id") ?: return
-        val appSecretPref = findPreference<EditTextPreference>("feishu_app_secret") ?: return
-
-        togglePref.onPreferenceClickListener = Preference.OnPreferenceClickListener {
-            manualConfigVisible = !manualConfigVisible
-            appIdPref.isVisible = manualConfigVisible
-            appSecretPref.isVisible = manualConfigVisible
-            true
-        }
-
-        appIdPref.onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _, newValue ->
-            view?.post { maybeStartFeishuService(newValue as? String, null) }
-            true
-        }
-        appSecretPref.onPreferenceChangeListener = Preference.OnPreferenceChangeListener { _, newValue ->
-            view?.post { maybeStartFeishuService(null, newValue as? String) }
-            true
-        }
-    }
-
-    private fun maybeStartFeishuService(pendingAppId: String?, pendingSecret: String?) {
-        val appId = pendingAppId ?: config.feishuAppId
-        val secret = pendingSecret ?: config.feishuAppSecret
-        if (appId.isNotBlank() && secret.isNotBlank()) {
-            if (!config.imRemoteEnabled) {
-                config.imRemoteEnabled = true
-                findPreference<androidx.preference.SwitchPreference>("im_remote_enabled")?.isChecked = true
-            }
-            RemoteImControlService.restart(requireContext())
-        }
-        refreshPairStatus("feishu")
-    }
-
-    // --- Pairing: Generate Code ---
-
-    private fun setupPairingPreferences() {
-        findPreference<Preference>("telegram_generate_code")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                generateAndShowCode("telegram")
-                true
-            }
-    }
-
-    private fun generateAndShowCode(channelId: String) {
-        val code = pairingManager.generateCode(channelId)
-        val channelName = if (channelId == "telegram") "Telegram" else "Feishu"
-
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.pairing_code_dialog_title)
-            .setMessage(getString(R.string.pairing_code_dialog_message, code, channelName))
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
-
-        startCodeCountdown(channelId)
-    }
-
-    private fun startCodeCountdown(channelId: String) {
-        telegramCountdownJob?.cancel()
-
-        telegramCountdownJob = scope.launch {
-            while (true) {
-                delay(5_000)
-                if (pairingManager.currentCode(channelId) == null) {
-                    refreshPairStatus(channelId)
-                    break
-                }
-            }
-        }
-    }
-
-    // --- Pairing: Unpair ---
-
-    private fun setupUnpairPreferences() {
-        findPreference<Preference>("telegram_unpair")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                pairingManager.unpair("telegram")
-                refreshPairStatus("telegram")
-                Toast.makeText(requireContext(), R.string.im_unpair_success, Toast.LENGTH_SHORT)
-                    .show()
-                true
-            }
-
-        findPreference<Preference>("feishu_unpair")?.onPreferenceClickListener =
-            Preference.OnPreferenceClickListener {
-                pairingManager.unpair("feishu")
-                refreshPairStatus("feishu")
-                Toast.makeText(requireContext(), R.string.im_unpair_success, Toast.LENGTH_SHORT)
-                    .show()
-                true
-            }
-    }
-
-    // --- Pairing: Status display ---
-
-    private fun refreshPairStatus(channelId: String) {
-        val statusPref = findPreference<Preference>("${channelId}_pair_status") ?: return
-        val unpairPref = findPreference<Preference>("${channelId}_unpair") ?: return
-
-        val paired = pairingManager.isPaired(channelId)
-        if (paired) {
-            val id = when (channelId) {
-                "telegram" -> config.telegramAllowedChatId
-                "feishu" -> config.feishuAllowedOpenId
-                else -> ""
-            }
-            statusPref.summary = getString(R.string.im_paired_with, id)
-            unpairPref.isVisible = true
-        } else {
-            if (channelId == "feishu" && config.feishuAppId.isNotBlank()) {
-                statusPref.summary = getString(R.string.feishu_pair_auto_hint)
-            } else {
-                statusPref.summary = getString(R.string.im_not_paired)
-            }
-            unpairPref.isVisible = false
-        }
-    }
-
     // --- Backend status and revoke ---
 
     private fun refreshBackendStatus() {
@@ -746,8 +398,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
     fun refreshFromConfig() {
         val maxStepsPref = findPreference<EditTextPreference>("max_steps")
         maxStepsPref?.text = config.maxSteps.toString()
-        refreshPairStatus("telegram")
-        refreshPairStatus("feishu")
         refreshAllProviderFields()
         refreshProfileSummary()
     }
@@ -804,11 +454,5 @@ class SettingsFragment : PreferenceFragmentCompat() {
             } catch (_: android.content.ActivityNotFoundException) {
             }
         }
-    }
-
-    override fun onDestroy() {
-        qrPollingJob?.cancel()
-        scope.cancel()
-        super.onDestroy()
     }
 }

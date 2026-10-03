@@ -617,7 +617,6 @@ class AgentService : Service() {
                 elementsProvider = { displayId, w, h ->
                     VdAccessibilityService.captureElements(displayId, w, h)
                 },
-                shouldForwardScreenshot = { config.imSendStepScreenshots },
                 blacklistedPackages = config.blacklistedPackages,
                 isScreenInteractive = { getSystemService(PowerManager::class.java).isInteractive },
                 maxStepsMessage = { getString(R.string.task_max_steps, it) },
@@ -1612,10 +1611,6 @@ class AgentService : Service() {
 
     val stateFlow: StateFlow<AgentState>?
         get() = engine?.state
-
-    /** Non-null StateFlow for ImAgentBridge subscription (null value = no engine) */
-    val decisionFlow: StateFlow<AgentState?>
-        get() = engine?.state ?: MutableStateFlow(null)
 
     val stepResultFlow: SharedFlow<StepResult>?
         get() = engine?.stepResults

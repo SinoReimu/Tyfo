@@ -45,16 +45,6 @@
             android:inputType="number"
             android:defaultValue="100" />
 
-        <Preference
-            android:key="share_config_qr"
-            android:title="@string/pref_share_config_qr"
-            android:summary="@string/pref_share_config_qr_summary" />
-
-        <Preference
-            android:key="scan_config_qr"
-            android:title="@string/pref_scan_config_qr"
-            android:summary="@string/pref_scan_config_qr_summary" />
-
     </PreferenceCategory>
 
     <!-- Voice assistant -->
@@ -69,97 +59,6 @@
             android:key="island_accessibility"
             android:title="@string/pref_island_a11y_title"
             android:summary="@string/pref_island_a11y_summary_off" />
-
-    </PreferenceCategory>
-
-    <!-- Remote Control -->
-    <PreferenceCategory app:title="@string/pref_category_remote_control">
-
-        <SwitchPreference
-            android:key="im_remote_enabled"
-            android:title="@string/pref_im_enabled_title"
-            android:summary="@string/pref_im_enabled_summary"
-            android:defaultValue="false" />
-
-        <SwitchPreference
-            android:key="im_send_step_screenshots"
-            android:title="@string/pref_im_step_screenshots_title"
-            android:summary="@string/pref_im_step_screenshots_summary"
-            android:defaultValue="false" />
-
-        <PreferenceScreen
-            android:key="subscreen_telegram"
-            android:title="@string/pref_telegram_title"
-            android:summary="@string/pref_telegram_summary">
-
-            <EditTextPreference
-                android:key="telegram_bot_token"
-                android:title="@string/pref_telegram_bot_token_title"
-                android:summary="@string/pref_masked_summary"
-                android:inputType="textPassword"
-                android:defaultValue="" />
-
-            <Preference
-                android:key="telegram_pair_status"
-                android:title="@string/pref_pair_status_title"
-                android:selectable="false"
-                android:summary="@string/im_not_paired" />
-
-            <Preference
-                android:key="telegram_generate_code"
-                android:title="@string/im_generate_code"
-                android:summary="@string/pref_generate_code_summary" />
-
-            <Preference
-                android:key="telegram_unpair"
-                android:title="@string/im_unpair"
-                android:summary="@string/pref_unpair_summary" />
-
-        </PreferenceScreen>
-
-        <PreferenceScreen
-            android:key="subscreen_feishu"
-            android:title="@string/pref_feishu_title"
-            android:summary="@string/pref_feishu_summary">
-
-            <Preference
-                android:key="feishu_qr_scan"
-                android:title="@string/feishu_qr_scan_title"
-                android:summary="@string/feishu_qr_scan_summary" />
-
-            <Preference
-                android:key="feishu_manual_config"
-                android:title="@string/feishu_manual_config_title"
-                android:summary="@string/feishu_manual_config_summary" />
-
-            <EditTextPreference
-                android:key="feishu_app_id"
-                android:title="@string/pref_feishu_app_id_title"
-                android:summary="@string/pref_not_set"
-                android:inputType="text"
-                android:defaultValue=""
-                app:isPreferenceVisible="false" />
-
-            <EditTextPreference
-                android:key="feishu_app_secret"
-                android:title="@string/pref_feishu_app_secret_title"
-                android:summary="@string/pref_masked_summary"
-                android:inputType="textPassword"
-                android:defaultValue=""
-                app:isPreferenceVisible="false" />
-
-            <Preference
-                android:key="feishu_pair_status"
-                android:title="@string/pref_pair_status_title"
-                android:selectable="false"
-                android:summary="@string/im_not_paired" />
-
-            <Preference
-                android:key="feishu_unpair"
-                android:title="@string/im_unpair"
-                android:summary="@string/pref_unpair_summary" />
-
-        </PreferenceScreen>
 
     </PreferenceCategory>
 
@@ -186,27 +85,6 @@
             android:key="manage_memory"
             android:title="@string/btn_manage_memory"
             android:summary="@string/pref_manage_memory_summary" />
-
-        <PreferenceScreen
-            android:key="subscreen_advanced"
-            android:title="@string/pref_advanced_title"
-            android:summary="@string/pref_advanced_summary">
-
-            <EditTextPreference
-                android:key="telegram_allowed_chat_id"
-                android:title="@string/pref_telegram_chat_id_title"
-                android:summary="@string/pref_not_set"
-                android:inputType="text"
-                android:defaultValue="" />
-
-            <EditTextPreference
-                android:key="feishu_allowed_open_id"
-                android:title="@string/pref_feishu_open_id_title"
-                android:summary="@string/pref_not_set"
-                android:inputType="text"
-                android:defaultValue="" />
-
-        </PreferenceScreen>
 
     </PreferenceCategory>
 

@@ -144,8 +144,6 @@ dependencies {
     // OkHttp for LLM API calls
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // QR code generation (for Feishu bot registration)
-    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     // JSON parsing
     implementation("org.json:json:20240303")

@@ -67,7 +67,6 @@ class AgentEngine(
     private val memoryRepository: GlobalMemoryRepository? = null,
     /** 读屏幕上的界面元素：(displayId, 宽, 高) → 元素（设备像素），拿不到返回 null。 */
     private val elementsProvider: ((Int, Int, Int) -> List<UiElement>?)? = null,
-    private val shouldForwardScreenshot: (() -> Boolean)? = null,
     private val blacklistedPackages: Set<String> = emptySet(),
     private val isScreenInteractive: (() -> Boolean)? = null,
     /**
@@ -121,9 +120,6 @@ class AgentEngine(
 
     private val _stepResults = MutableSharedFlow<StepResult>(replay = 0, extraBufferCapacity = 20)
     val stepResults: SharedFlow<StepResult> = _stepResults.asSharedFlow()
-
-    private val _stepScreenshots = MutableSharedFlow<ByteArray>(replay = 0, extraBufferCapacity = 5)
-    val stepScreenshots: SharedFlow<ByteArray> = _stepScreenshots.asSharedFlow()
 
     @Volatile
     private var paused = false
@@ -567,9 +563,6 @@ class AgentEngine(
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to save debug screenshot", e)
                 }
-            }
-            if (shouldForwardScreenshot?.invoke() == true) {
-                _stepScreenshots.tryEmit(android.util.Base64.decode(base64, android.util.Base64.DEFAULT))
             }
 
             // FLAG_SECURE detection: consecutive strictly-black frames indicate a
