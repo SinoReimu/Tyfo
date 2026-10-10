@@ -46,6 +46,7 @@ class VirtualDisplayManager(
 
         // Hidden VirtualDisplay flags (not in public API)
         // VirtualDisplay flags: mFlags=120533
+        private const val VIRTUAL_DISPLAY_FLAG_SECURE = 1 shl 2                 // 4
         private const val VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH = 1 shl 6         // 64
         private const val VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT = 1 shl 7   // 128
         private const val VIRTUAL_DISPLAY_FLAG_TRUSTED = 1 shl 10              // 1024
@@ -203,7 +204,17 @@ class VirtualDisplayManager(
             // where the VD powers off (renders black) whenever the phone screen turns off.
             // DEVICE_DISPLAY_GROUP stays as a fallback: without some non-default group flag
             // DMS drops ALWAYS_UNLOCKED.
+            //
+            // SECURE: lets the VD show (and the agent capture) FLAG_SECURE windows instead of
+            // black. On Android 17 it also exempts the VD from the canDisplayOnRemoteDevices
+            // opt-out that otherwise blocks some activities. DMS only honours it for a caller
+            // that holds CAPTURE_SECURE_VIDEO_OUTPUT (root) or is the system uid, so the
+            // privileged service strips it when it runs as shell (would reject the whole VD).
+            // The service also decides the display-group strategy: on 17 it drops
+            // OWN/DEVICE_DISPLAY_GROUP and routes creation through a VirtualDevice instead,
+            // which is the only way to leave display group 0 there (separate_timeouts).
             val flags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
+                VIRTUAL_DISPLAY_FLAG_SECURE or
                 VIRTUAL_DISPLAY_FLAG_SUPPORTS_TOUCH or
                 VIRTUAL_DISPLAY_FLAG_ROTATES_WITH_CONTENT or
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or

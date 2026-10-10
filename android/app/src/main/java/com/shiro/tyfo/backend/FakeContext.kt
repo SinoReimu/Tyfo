@@ -33,6 +33,19 @@ object FakeContext {
     private class ShellContext : ContextWrapper(null) {
 
         override fun getPackageName(): String = PACKAGE
+        override fun getOpPackageName(): String = PACKAGE
+
+        // VirtualDeviceInternal's constructor does context.getApplicationContext()
+        // .getAttributionSource(); with a null base ContextWrapper these would NPE, so
+        // answer them here. The attribution package must be the one the CDM association
+        // was created for (com.android.shell); at system/root uid the uid field isn't
+        // enforced to match, so shell's 2000 is fine.
+        override fun getApplicationContext(): Context = this
+
+        override fun getAttributionSource(): android.content.AttributionSource =
+            android.content.AttributionSource.Builder(2000)
+                .setPackageName(PACKAGE)
+                .build()
 
         override fun getSystemService(name: String): Any? {
             return when (name) {

@@ -22,6 +22,11 @@ class PrivilegedService : IPrivilegedService.Stub() {
     companion object {
         private const val TAG = "PrivilegedService"
 
+        // VirtualDisplay flags we adjust per uid / Android version.
+        private const val FLAG_SECURE = 1 shl 2               // 4
+        private const val FLAG_OWN_DISPLAY_GROUP = 1 shl 11   // 2048
+        private const val FLAG_DEVICE_DISPLAY_GROUP = 1 shl 15 // 32768
+
         fun pngToJpeg(png: ByteArray, maxWidth: Int, quality: Int): ByteArray? {
             val bmp = BitmapFactory.decodeByteArray(png, 0, png.size) ?: return null
             val scaled = if (maxWidth > 0 && bmp.width > maxWidth) {
@@ -90,6 +95,8 @@ class PrivilegedService : IPrivilegedService.Stub() {
             Log.d(TAG, "captureScreen: displayId mismatch or no ImageReader, using CaptureOps")
             null
         } ?: CaptureOps.captureScreen(displayId, maxWidth, quality) ?: return null
+        // TEMP DEBUG: dump the exact bytes the agent receives, to diagnose black frames.
+        try { java.io.File("/data/local/tmp/tyfocap/cap.jpg").writeBytes(jpeg) } catch (_: Exception) {}
         val shm = SharedMemory.create("screenshot", jpeg.size)
         try {
             val buffer = shm.mapReadWrite()
@@ -104,11 +111,22 @@ class PrivilegedService : IPrivilegedService.Stub() {
     }
 
     private fun captureFromImageReader(maxWidth: Int, quality: Int): ByteArray? {
-        // Prefer mirror VD's cached frame — the listener continuously caches the latest
-        // frame from the mirror ImageReader, so this works regardless of the main VD's
-        // surface state (SurfaceView vs ImageReader).
-        // The mirror sits in display group 0 and blanks while the phone screen is off;
-        // the main VD (own display group) keeps rendering, so read it directly then.
+        // When the main VD renders into our own ImageReader (headless — the normal agent case,
+        // incl. behind the keyguard), read it directly. Its output is a SECURE display, so
+        // FLAG_SECURE windows are included; the mirror is a plain (non-secure) VD and SurfaceFlinger
+        // blacks such content out of it. Preferring the main reader here is what makes the agent
+        // actually see secure screens while a task runs (panel on → mirror would otherwise win).
+        if (mainSurfaceIsImageReader) {
+            readMainVdFrame(maxWidth, quality)?.let {
+                Log.d(TAG, "captureFromImageReader: using main VD reader (${it.size} bytes, secure-capable)")
+                return it
+            }
+        }
+
+        // VIEW/TAKEOVER mode: the main VD surface is a SurfaceView, so its ImageReader is stale.
+        // Fall back to the always-on mirror (loses FLAG_SECURE content, acceptable while the user
+        // is watching the VD on the physical screen). The mirror blanks in group 0 when the panel
+        // is off, so only trust it while it is ON.
         val mirrorOn = mirrorVd?.display?.state == android.view.Display.STATE_ON
         val mirrorJpeg = if (mirrorOn) cachedMirrorFrame else null
         if (mirrorJpeg != null) {
@@ -126,21 +144,22 @@ class PrivilegedService : IPrivilegedService.Stub() {
             return mirrorJpeg
         }
 
-        // Fallback: main VD's ImageReader (works when surface is not on SurfaceView)
+        // Last resort: try the main reader even in VIEW mode, then the last good frame.
+        return readMainVdFrame(maxWidth, quality) ?: cachedVdFrame
+    }
+
+    private fun readMainVdFrame(maxWidth: Int, quality: Int): ByteArray? {
         val reader = vdImageReader ?: return null
-        val image = try { reader.acquireLatestImage() } catch (_: Exception) { null }
-        if (image != null) {
-            try {
-                val bitmap = imageToBitmap(image) ?: return cachedVdFrame
-                val jpeg = bitmapToJpeg(bitmap, maxWidth, quality)
-                bitmap.recycle()
-                cachedVdFrame = jpeg
-                return jpeg
-            } finally {
-                image.close()
-            }
+        val image = try { reader.acquireLatestImage() } catch (_: Exception) { null } ?: return null
+        return try {
+            val bitmap = imageToBitmap(image) ?: return cachedVdFrame
+            val jpeg = bitmapToJpeg(bitmap, maxWidth, quality)
+            bitmap.recycle()
+            cachedVdFrame = jpeg
+            jpeg
+        } finally {
+            image.close()
         }
-        return cachedVdFrame
     }
 
     private fun imageToBitmap(image: android.media.Image): android.graphics.Bitmap? {
@@ -199,9 +218,20 @@ class PrivilegedService : IPrivilegedService.Stub() {
         ctor.newInstance(FakeContext.instance)
     }
 
+    // CDM association id the connector prepared for com.android.shell. -1 = no VirtualDevice
+    // path (set from the launch args by PrivilegedServiceMain; only used on Android 17+).
+    @Volatile var virtualDeviceAssociationId: Int = -1
+
+    // The VirtualDevice that owns the main VD on Android 17 (android.companion.virtual
+    // .VirtualDeviceManager.VirtualDevice, held via Any to avoid the @SystemApi at compile time).
+    private var virtualDevice: Any? = null
+
     private var virtualDisplay: VirtualDisplay? = null
     private var vdImageReader: ImageReader? = null
     private var vdDisplayId: Int = -1
+    // True while the main VD renders into vdImageReader (headless). False in VIEW/TAKEOVER mode,
+    // when the surface is a SurfaceView and the ImageReader goes stale. Drives capture routing.
+    @Volatile private var mainSurfaceIsImageReader: Boolean = true
     @Volatile private var cachedVdFrame: ByteArray? = null  // Last successful JPEG capture from VD ImageReader
 
     // Mirror VD: always-on capture source that mirrors the main VD.
@@ -218,7 +248,27 @@ class PrivilegedService : IPrivilegedService.Stub() {
         checkCaller()
         return try {
             val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 4)
-            val vd = createVdViaGlobal(name, width, height, dpi, reader.surface, flags)
+
+            // Shell uid can't create a SECURE display (DMS rejects the whole request), so drop
+            // SECURE there; root and system both pass the CAPTURE_SECURE_VIDEO_OUTPUT gate.
+            var effectiveFlags = flags
+            if (android.os.Process.myUid() > 1000) {
+                effectiveFlags = effectiveFlags and FLAG_SECURE.inv()
+            }
+
+            // Android 17 ignores OWN_DISPLAY_GROUP (separate_timeouts keeps every plain VD in
+            // group 0, where it blanks with the phone). The only way out of group 0 is a VD
+            // owned by a VirtualDevice, so route creation through one when an association exists.
+            val useVirtualDevice = android.os.Build.VERSION.SDK_INT >= 37 && virtualDeviceAssociationId >= 0
+            val vd = if (useVirtualDevice) {
+                // DMS adds DEVICE_DISPLAY_GROUP for a VirtualDevice-owned trusted VD itself; our
+                // own group flags would be stripped, so clear them for a clean request.
+                val vdmFlags = effectiveFlags and (FLAG_OWN_DISPLAY_GROUP or FLAG_DEVICE_DISPLAY_GROUP).inv()
+                createVdViaVirtualDevice(name, width, height, dpi, reader.surface, vdmFlags)
+                    ?: createVdViaGlobal(name, width, height, dpi, reader.surface, effectiveFlags)
+            } else {
+                createVdViaGlobal(name, width, height, dpi, reader.surface, effectiveFlags)
+            }
             if (vd == null) {
                 reader.close()
                 return -1
@@ -234,6 +284,7 @@ class PrivilegedService : IPrivilegedService.Stub() {
             vdDisplayId = displayId
             cachedVdFrame = null
             mirrorReady = false
+            mainSurfaceIsImageReader = true
             Log.i(TAG, "VD created: displayId=$displayId ${width}x${height}")
             if (vdAwakeRequested) acquireVdWakeLock(displayId)
 
@@ -478,6 +529,116 @@ class PrivilegedService : IPrivilegedService.Stub() {
     }
 
     /**
+     * Android 17 path: create the VD through a VirtualDevice so it lands in that device's own
+     * display group (not group 0). Needs a CDM association for the attribution package
+     * (com.android.shell) — the connector sets one up and passes its id. Requires the owner uid
+     * to be able to own a VirtualDevice: shell (com.android.shell=2000) or system (1000). SECURE
+     * additionally needs system uid, already handled by the caller stripping it for shell.
+     *
+     * All of VirtualDeviceManager / VirtualDeviceParams is @SystemApi (absent from the compile
+     * SDK), so everything here goes through reflection.
+     */
+    @SuppressLint("PrivateApi")
+    private fun createVdViaVirtualDevice(
+        name: String, width: Int, height: Int, dpi: Int, surface: Surface, flags: Int
+    ): VirtualDisplay? {
+        return try {
+            val vdmBinder = Class.forName("android.os.ServiceManager")
+                .getMethod("getService", String::class.java).invoke(null, "virtualdevice")
+                as? android.os.IBinder ?: return null
+            val ivdmClass = Class.forName("android.companion.virtual.IVirtualDeviceManager")
+            val ivdm = Class.forName("android.companion.virtual.IVirtualDeviceManager\$Stub")
+                .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, vdmBinder)
+            val vdmClass = Class.forName("android.companion.virtual.VirtualDeviceManager")
+            val vdm = vdmClass.getConstructor(ivdmClass, android.content.Context::class.java)
+                .newInstance(ivdm, FakeContext.instance)
+
+            val builderClass = Class.forName("android.companion.virtual.VirtualDeviceParams\$Builder")
+            val builder = builderClass.getConstructor().newInstance()
+            builderClass.getMethod("setName", String::class.java).invoke(builder, "Tyfo")
+            // LOCK_STATE_ALWAYS_UNLOCKED = 1 — keep the VD usable while the phone is locked.
+            builderClass.getMethod("setLockState", Int::class.javaPrimitiveType).invoke(builder, 1)
+            // POLICY_TYPE_CLIPBOARD = 4, DEVICE_POLICY_CUSTOM = 1 — share the default clipboard so
+            // paste (InputInjector writes device 0's clipboard, then KEYCODE_PASTE) works on the VD.
+            builderClass.getMethod("setDevicePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                .invoke(builder, 4, 1)
+            // Let work-profile apps through the managed-account nearby-streaming policy.
+            val matchingUsers = workProfileUserHandles()
+            if (matchingUsers.isNotEmpty()) {
+                builderClass.getMethod("setUsersWithMatchingAccounts", java.util.Set::class.java)
+                    .invoke(builder, matchingUsers)
+            }
+            val params = builderClass.getMethod("build").invoke(builder)
+            val paramsClass = Class.forName("android.companion.virtual.VirtualDeviceParams")
+
+            closeVirtualDevice()
+            val device = vdmClass.getMethod("createVirtualDevice", Int::class.javaPrimitiveType, paramsClass)
+                .invoke(vdm, virtualDeviceAssociationId, params) ?: run {
+                    Log.w(TAG, "createVirtualDevice returned null (association=$virtualDeviceAssociationId)")
+                    return null
+                }
+            virtualDevice = device
+
+            val config = buildVirtualDisplayConfig(name, width, height, dpi, surface, flags) ?: run {
+                closeVirtualDevice(); return null
+            }
+            val vd = device.javaClass.getMethod(
+                "createVirtualDisplay",
+                Class.forName("android.hardware.display.VirtualDisplayConfig"),
+                java.util.concurrent.Executor::class.java,
+                Class.forName("android.hardware.display.VirtualDisplay\$Callback")
+            ).invoke(device, config, java.util.concurrent.Executor { it.run() }, null) as? VirtualDisplay
+            if (vd == null) {
+                Log.w(TAG, "VirtualDevice.createVirtualDisplay returned null")
+                closeVirtualDevice()
+                return null
+            }
+            Log.i(TAG, "VD created via VirtualDevice (flags=0x${Integer.toHexString(flags)})")
+            vd
+        } catch (e: Exception) {
+            val cause = (e as? java.lang.reflect.InvocationTargetException)?.cause ?: e
+            Log.w(TAG, "createVdViaVirtualDevice failed: ${cause.javaClass.simpleName}: ${cause.message}")
+            closeVirtualDevice()
+            null
+        }
+    }
+
+    /** UserHandles of all profiles (incl. work profiles) so managed apps aren't blocked on the VD. */
+    @SuppressLint("PrivateApi")
+    private fun workProfileUserHandles(): Set<Any> {
+        return try {
+            val umBinder = Class.forName("android.os.ServiceManager")
+                .getMethod("getService", String::class.java).invoke(null, "user")
+                as? android.os.IBinder ?: return emptySet()
+            val ium = Class.forName("android.os.IUserManager\$Stub")
+                .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, umBinder)
+            // List<UserInfo> getProfiles(int userId, boolean enabledOnly)
+            val profiles = ium.javaClass.getMethod(
+                "getProfiles", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType
+            ).invoke(ium, 0, false) as? List<*> ?: return emptySet()
+            val ofMethod = android.os.UserHandle::class.java.getMethod("of", Int::class.javaPrimitiveType)
+            profiles.mapNotNull { ui ->
+                ui ?: return@mapNotNull null
+                val id = ui.javaClass.getField("id").getInt(ui)
+                ofMethod.invoke(null, id)
+            }.toSet()
+        } catch (e: Exception) {
+            Log.w(TAG, "workProfileUserHandles failed: ${e.message}")
+            emptySet()
+        }
+    }
+
+    private fun closeVirtualDevice() {
+        val device = virtualDevice ?: return
+        virtualDevice = null
+        try {
+            device.javaClass.getMethod("close").invoke(device)
+        } catch (e: Exception) {
+            Log.w(TAG, "closeVirtualDevice failed: ${e.message}")
+        }
+    }
+
+    /**
      * Build a VirtualDisplayConfig object using its Builder (API 33+).
      * VirtualDisplayConfig.Builder(String name, int width, int height, int densityDpi)
      *   .setFlags(int)
@@ -557,6 +718,10 @@ class PrivilegedService : IPrivilegedService.Stub() {
             vdImageReader = null
             vdDisplayId = -1
             cachedVdFrame = null
+            // Closing the VirtualDevice tears down its display group and, because the owning
+            // VirtualDevice adds DESTROY_CONTENT_ON_REMOVAL, destroys the VD's tasks instead of
+            // dumping them onto display 0.
+            closeVirtualDevice()
             Log.i(TAG, "VD released")
         } catch (e: Exception) {
             Log.e(TAG, "releaseVirtualDisplay failed", e)
@@ -648,6 +813,8 @@ class PrivilegedService : IPrivilegedService.Stub() {
             val vd = virtualDisplay ?: return
             val targetSurface = surface ?: vdImageReader?.surface ?: return
             vd.surface = targetSurface
+            // Non-null = VIEW/TAKEOVER (SurfaceView); null = back to our ImageReader.
+            mainSurfaceIsImageReader = surface == null
         } catch (e: Exception) {
             Log.e(TAG, "setVirtualDisplaySurface failed", e)
         }

@@ -22,6 +22,10 @@ object PrivilegedServiceMain {
 
         val token = args.find { it.startsWith("--token=") }?.substringAfter("=")
         val authority = args.find { it.startsWith("--authority=") }?.substringAfter("=")
+        // On Android 17 the VD must belong to a VirtualDevice to leave display group 0, and the
+        // VirtualDevice is created against a CDM association the connector set up (com.android.shell).
+        val associationId = args.find { it.startsWith("--association-id=") }
+            ?.substringAfter("=")?.toIntOrNull() ?: -1
 
         if (token == null || authority == null) {
             Log.e(TAG, "Missing --token or --authority argument")
@@ -29,6 +33,8 @@ object PrivilegedServiceMain {
         }
 
         val service = PrivilegedService()
+        service.virtualDeviceAssociationId = associationId
+        Log.i(TAG, "virtualDeviceAssociationId=$associationId")
         val binder = service.asBinder()
 
         val appBinder: IBinder? = try {
